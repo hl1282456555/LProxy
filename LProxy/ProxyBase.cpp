@@ -48,7 +48,7 @@ bool ProxyBase::InitSocket()
 			throw "Create a new socket failed.";
 		}
 
-		unsigned long sockMode;
+		unsigned long sockMode(0);
 		if (ioctlsocket(SockHandle, FIONBIO, &sockMode) != NO_ERROR) {
 			LOG(Warning, "Set non-blocking method failed.");
 		}

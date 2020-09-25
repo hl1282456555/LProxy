@@ -2,15 +2,9 @@
 #define PROXY_SERVER_H
 
 #include "ProxyBase.h"
+#include "ClientSocket.h"
 
-#include <mutex>
 #include <vector>
-
-struct ClientSocket
-{
-	SOCKADDR_IN Addr;
-	SOCKET		SockHandle;
-};
 
 class ProxyServer : public ProxyBase
 {

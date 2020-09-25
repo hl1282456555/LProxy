@@ -33,14 +33,14 @@ void ProxyServer::Run()
 			int len = sizeof(acceptAddr);
 			SOCKET acceptSock = accept(SockHandle, (SOCKADDR*)&acceptAddr, &len);
 			if (acceptSock != SOCKET_ERROR) {
-				ClientList.push_back({ acceptAddr, acceptSock });
+
+				ClientSocket client(acceptAddr, acceptSock);
+				ClientList.push_back(client);
 				
 				char acceptHost[16];
 				InetNtopA(AF_INET, &acceptAddr.sin_addr, acceptHost, 16);
 				LOG(Log, "Accept a new client, addr: %s", acceptHost);
 			}
-
-
 		}
 	});
 

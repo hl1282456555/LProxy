@@ -155,6 +155,7 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="ClientSocket.cpp" />
     <ClCompile Include="EasyLog.cpp" />
     <ClCompile Include="LProxy.cpp" />
     <ClCompile Include="MiscHelper.cpp" />
@@ -162,6 +163,7 @@
     <ClCompile Include="ProxyServer.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="ClientSocket.h" />
     <ClInclude Include="EasyLog.h" />
     <ClInclude Include="json.hpp" />
     <ClInclude Include="MiscHelper.h" />
