@@ -5,7 +5,7 @@ ProxyBase::ProxyBase()
 	: SockIP("localhost")
 	, SockPort(1080)
 	, bAnyAddr(true)
-	, SockHandle(NULL)
+	, SockHandle(INVALID_SOCKET)
 	, SockState(ESocketState::NotInit)
 {
 
@@ -13,28 +13,21 @@ ProxyBase::ProxyBase()
 
 ProxyBase::~ProxyBase()
 {
-	if (SockHandle == NULL) {
+	if (SockHandle == INVALID_SOCKET) {
 		return;
 	}
 
 	closesocket(SockHandle);
 	WSACleanup();
-	SockHandle = NULL;
+	SockHandle = INVALID_SOCKET;
 }
 
-bool ProxyBase::InitSocket(const std::string& IP, int Port)
+bool ProxyBase::InitSocket()
 {
 	try {
 		if (SockState > ESocketState::NotInit) {
 			throw "Socket is already initialized, don't init twice.";
 		}
-
-		if (IP.empty()) {
-			throw "No necessary information to create socket.";
-		}
-
-		SockIP = IP;
-		SockPort = Port;
 
 		LOG(Log, "Initing socket...");
 
@@ -51,12 +44,19 @@ bool ProxyBase::InitSocket(const std::string& IP, int Port)
 		}
 
 		SockHandle = socket(AF_INET, SOCK_STREAM, 0);
-		if (SockHandle == NULL) {
+		if (SockHandle == INVALID_SOCKET) {
 			throw "Create a new socket failed.";
+		}
+
+		unsigned long sockMode;
+		if (ioctlsocket(SockHandle, FIONBIO, &sockMode) != NO_ERROR) {
+			LOG(Warning, "Set non-blocking method failed.");
 		}
 
 		SockState = ESocketState::Initialized;
 		LOG(Log, "Socket initialized...");
+
+		return true;
 	}
 	catch (const std::exception& Err) {
 		LOG(Error, "Init socket failed, err: %s", Err.what());

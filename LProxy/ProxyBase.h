@@ -31,7 +31,9 @@ public:
 
 	virtual inline ESocketState GetState() { return SockState; }
 
-	virtual bool InitSocket(const std::string& IP, int Port);
+	virtual bool InitSocket();
+
+	virtual void Run() = 0;
 
 protected:
 	std::string	SockIP;

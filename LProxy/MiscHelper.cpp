@@ -1,5 +1,4 @@
 #include "MiscHelper.h"
-#include "cpprest/asyncrt_utils.h"
 #include "EasyLog.h"
 
 #include <sstream>

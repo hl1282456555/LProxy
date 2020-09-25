@@ -3,7 +3,13 @@
 
 #include <iostream>
 
+#include "ProxyServer.h"
+
 int main()
 {
-    std::cout << "Hello World!\n";
+	ProxyServer server;
+
+	server.Run();
+
+	return 0;
 }
