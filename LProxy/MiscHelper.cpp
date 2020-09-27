@@ -111,7 +111,7 @@ std::string MiscHelper::GetLocalHost()
 	return ipBuffer;
 }
 
-std::string MiscHelper::NewGuid(unsigned int Length)
+std::string MiscHelper::NewGuid(int Length)
 {
 	std::stringstream stream;
 
