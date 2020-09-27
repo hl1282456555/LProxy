@@ -55,6 +55,8 @@ public:
 	template<typename ...ArgType>
 	void PrintLog(ELogLevel LogLevel, const char* Format, ArgType... Args)
 	{
+		std::lock_guard<std::mutex> printScope(PrintLock);
+
 		std::string time = MiscHelper::GetDateTime();
 
 		std::string logFormat = "[ " + time + " ]" + "[ " + GetLevelName(LogLevel) + " ] : " + Format;
@@ -88,6 +90,8 @@ private:
 	static std::shared_ptr<IEasyLog> Instance;
 
 	std::ofstream LogFile;
+
+	std::mutex PrintLock;
 };
 
 #define LOG(Level, Format, ...) IEasyLog::Get()->PrintLog(ELogLevel::##Level, ##Format, ##__VA_ARGS__)
