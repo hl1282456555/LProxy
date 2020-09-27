@@ -62,13 +62,13 @@ bool ProxyServer::Listen()
 			throw "The socket not initialized.";
 		}
 
-		SOCKADDR_IN ServerAddr;
-		std::memset(&ServerAddr, 0, sizeof(ServerAddr));
-		ServerAddr.sin_family = AF_INET;
-		ServerAddr.sin_port = SockPort;
-		InetPtonA(AF_INET, SockIP.c_str(), &ServerAddr.sin_addr.S_un);
+		SOCKADDR_IN serverAddr;
+		std::memset(&serverAddr, 0, sizeof(serverAddr));
+		serverAddr.sin_family = AF_INET;
+		serverAddr.sin_port = SockPort;
+		InetPtonA(AF_INET, SockIP.c_str(), &serverAddr.sin_addr.S_un);
 
-		if (bind(SockHandle, (SOCKADDR*)&ServerAddr, sizeof(SOCKADDR)) == SOCKET_ERROR) {
+		if (bind(SockHandle, (SOCKADDR*)&serverAddr, sizeof(SOCKADDR)) == SOCKET_ERROR) {
 			throw "Bind server ip and port failed.";
 		}
 
