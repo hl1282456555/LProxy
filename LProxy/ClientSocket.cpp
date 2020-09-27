@@ -39,19 +39,6 @@ bool ClientSocket::InitConnection()
 		return false;
 	}
 
-	std::thread clientThread(
-	[&]()
-	{
-		while (!bRequestClose)
-		{
-
-		}
-
-		LOG(Log, "[Client: %s]Client socket stopped.", Guid.c_str());
-	});
-
-	clientThread.detach();
-
 	return true;
 }
 
@@ -119,7 +106,7 @@ bool ClientSocket::ProcessHandshake()
 	return true;
 }
 
-bool ClientSocket::ProcessTravel()
+bool ClientSocket::ProcessLicenseCheck()
 {
 	LOG(Log, "[Client: %s]Processing travel.", Guid.c_str());
 	static const int travelBufferSize = 4096;
@@ -148,7 +135,7 @@ bool ClientSocket::ProcessTravel()
 		LOG(Warning, "[Client: %s]Wrong reserved field value.");
 		return false;
 	}
-	
+
 	payload.DestPort.reserve(2);
 
 	reader.Serialize(&payload.AddressType, 1);
@@ -178,6 +165,10 @@ bool ClientSocket::ProcessTravel()
 		reader.Serialize(payload.DestPort.data(), 2);
 		break;
 	}
+	default:
+		LOG(Warning, "[Client: %s]Wrong address type.", Guid.c_str());
+		return false;
 	}
 
+	return true;
 }

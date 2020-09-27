@@ -23,7 +23,7 @@ protected:
 
 	virtual bool ProcessHandshake();
 
-	virtual bool ProcessTravel();
+	virtual bool ProcessLicenseCheck();
 
 protected:
 	SOCKADDR_IN Addr;
