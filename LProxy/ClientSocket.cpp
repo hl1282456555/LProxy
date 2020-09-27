@@ -170,5 +170,24 @@ bool ClientSocket::ProcessLicenseCheck()
 		return false;
 	}
 
+	switch (payload.Cmd)
+	{
+	case ECommandType::Connect:
+	{
+		return ProcessConnectCmd(payload);
+		break;
+	}
+	case ECommandType::Bind:
+	case ECommandType::UDP:
+	default:
+		LOG(Warning, "[Client: %s]Not supported command.");
+		return false;
+	}
+
 	return true;
+}
+
+bool ClientSocket::ProcessConnectCmd(const TravelPayload& Payload)
+{
+	return false;
 }

@@ -25,6 +25,8 @@ protected:
 
 	virtual bool ProcessLicenseCheck();
 
+	virtual bool ProcessConnectCmd(const TravelPayload& Payload);
+
 protected:
 	SOCKADDR_IN Addr;
 	SOCKET		SockHandle;
