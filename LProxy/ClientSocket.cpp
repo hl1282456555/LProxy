@@ -2,6 +2,8 @@
 #include "EasyLog.h"
 #include "BufferReader.h"
 
+#include <WS2tcpip.h>
+
 ClientSocket::ClientSocket(SOCKADDR_IN InAddr, SOCKET InHandle)
 	: Addr(InAddr)
 	, SockHandle(InHandle)
@@ -163,6 +165,8 @@ bool ClientSocket::ProcessLicenseCheck()
 
 		reader.Serialize(payload.DestAddr.data(), nameLen);
 		reader.Serialize(payload.DestPort.data(), 2);
+
+		payload.DestAddr.push_back('0x00');
 		break;
 	}
 	default:
@@ -189,5 +193,30 @@ bool ClientSocket::ProcessLicenseCheck()
 
 bool ClientSocket::ProcessConnectCmd(const TravelPayload& Payload)
 {
-	return false;
+	SOCKET destSock = socket(AF_INET, SOCK_STREAM, 0);
+	if (destSock == INVALID_SOCKET) {
+		return false;
+	}
+
+	SOCKADDR_IN serverAddr;
+	std::memset(&serverAddr, 0, sizeof(serverAddr));
+	serverAddr.sin_family = AF_INET;
+	serverAddr.sin_port = 0;
+	InetPtonA(AF_INET, "localhost", &serverAddr.sin_addr.S_un);
+
+	if (bind(destSock, (SOCKADDR*)&serverAddr, sizeof(SOCKADDR)) == SOCKET_ERROR) {
+		return false;
+	}
+
+	SOCKADDR_IN destAddr;
+	std::memset(&destAddr, 0, sizeof(destAddr));
+	destAddr.sin_family = AF_INET;
+	std::memcpy(&destAddr.sin_port, Payload.DestPort.data(), 2 * sizeof(char));
+	InetPtonA(AF_INET, Payload.DestAddr.data(), &destAddr.sin_addr.S_un);
+
+	if (connect(destSock, (SOCKADDR*)&destAddr, sizeof(SOCKADDR) == SOCKET_ERROR)) {
+		return false;
+	}
+
+	return true;
 }
