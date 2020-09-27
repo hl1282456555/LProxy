@@ -8,6 +8,7 @@
 #include <iostream>
 #include <ctime>
 #include <winsock.h>
+#include <random>
 
 std::string MiscHelper::GetDateNow()
 {
@@ -108,4 +109,24 @@ std::string MiscHelper::GetLocalHost()
 	char ipBuffer[32];
 	std::strcpy(ipBuffer, inet_ntoa(*(in_addr*)*host->h_addr_list));
 	return ipBuffer;
+}
+
+std::string MiscHelper::NewGuid(unsigned int Length)
+{
+	std::stringstream stream;
+
+	for (int length = 0; length < Length; length++)
+	{
+		std::random_device device;
+		std::mt19937 generator(device());
+		std::uniform_int_distribution<> distribution(0, 255);
+
+		std::stringstream hexStream;
+		hexStream << std::hex << distribution(generator);
+		std::string hexStr = hexStream.str();
+
+		stream << (hexStr.length() < 2 ? '0' + hexStr : hexStr);
+	}
+
+	return stream.str();
 }

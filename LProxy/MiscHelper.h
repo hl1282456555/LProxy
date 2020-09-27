@@ -16,6 +16,7 @@ public:
 	static void CloseProcessByHandle(DWORD ProcessId);
 	static Json	LoadConfig();
 	static std::string GetLocalHost();
+	static std::string NewGuid(unsigned int Length);
 };
 
 #endif
