@@ -34,12 +34,18 @@ void ProxyServer::Run()
 			SOCKET acceptSock = accept(SockHandle, (SOCKADDR*)&acceptAddr, &len);
 			if (acceptSock != SOCKET_ERROR) {
 
-				ClientSocket client(acceptAddr, acceptSock);
-				ClientList.push_back(client);
-				
 				char acceptHost[16];
 				InetNtopA(AF_INET, &acceptAddr.sin_addr, acceptHost, 16);
 				LOG(Log, "Accept a new client, addr: %s", acceptHost);
+
+				if (ClientList.size() >= std::thread::hardware_concurrency()) {
+					LOG(Warning, "Can't accept more client, no more cpu core for it, will close this client socket.");
+					closesocket(acceptSock);
+					continue;
+				}
+
+				ClientSocket client(acceptAddr, acceptSock);
+				ClientList.push_back(client);
 			}
 		}
 	});
