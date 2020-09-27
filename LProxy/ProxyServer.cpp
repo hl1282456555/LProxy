@@ -34,7 +34,7 @@ void ProxyServer::Run()
 			SOCKET acceptSock = accept(SockHandle, (SOCKADDR*)&acceptAddr, &len);
 			if (acceptSock != SOCKET_ERROR) {
 
-				char acceptHost[16];
+				char acceptHost[16] = { 0 };
 				InetNtopA(AF_INET, &acceptAddr.sin_addr, acceptHost, 16);
 				LOG(Log, "Accept a new client, addr: %s", acceptHost);
 
@@ -44,8 +44,10 @@ void ProxyServer::Run()
 					continue;
 				}
 
-				ClientSocket client(acceptAddr, acceptSock);
-				ClientList.push_back(client);
+				std::shared_ptr<ClientSocket> client(new ClientSocket(acceptAddr, acceptSock));
+				if (client->InitConnection()) {
+					ClientList.push_back(client);
+				}
 			}
 		}
 	});
@@ -87,4 +89,11 @@ bool ProxyServer::Listen()
 void ProxyServer::SignalHandler(int Signal)
 {
 	bStopServer = true;
+}
+
+void ProxyServer::CloseClient(const ClientSocket& Client)
+{
+	std::lock_guard<std::mutex> clientListScope(ClientListLock);
+
+	std::remove_if(ClientList.begin(), ClientList.end(), [&](const std::shared_ptr<ClientSocket>& Other) { return Client == *Other; });
 }

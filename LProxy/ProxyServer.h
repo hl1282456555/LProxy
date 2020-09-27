@@ -5,6 +5,7 @@
 #include "ClientSocket.h"
 
 #include <vector>
+#include <mutex>
 
 class ProxyServer : public ProxyBase
 {
@@ -18,8 +19,12 @@ public:
 
 	static void SignalHandler(int Signal);
 
+	virtual void CloseClient(const ClientSocket& Client);
+
 protected:
-	std::vector<ClientSocket>	ClientList;
+	std::vector<std::shared_ptr<ClientSocket>>	ClientList;
+
+	std::mutex ClientListLock;
 };
 
 #endif // !PROXY_SERVER_H
