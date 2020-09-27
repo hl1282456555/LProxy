@@ -218,5 +218,7 @@ bool ClientSocket::ProcessConnectCmd(const TravelPayload& Payload)
 		return false;
 	}
 
+	LOG(Log, "[Client: %s]Connect to destination server succeeded.", Guid.c_str());
+
 	return true;
 }
