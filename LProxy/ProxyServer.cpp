@@ -95,5 +95,7 @@ void ProxyServer::CloseClient(const ClientSocket& Client)
 {
 	std::lock_guard<std::mutex> clientListScope(ClientListLock);
 
-	std::remove_if(ClientList.begin(), ClientList.end(), [&](const std::shared_ptr<ClientSocket>& Other) { return Client == *Other; });
+	if (std::remove_if(ClientList.begin(), ClientList.end(), [&](const std::shared_ptr<ClientSocket>& Other) { return Client == *Other; }) == ClientList.end()) {
+		LOG(Warning, "The client specified for destruction was not found.");
+	}
 }
