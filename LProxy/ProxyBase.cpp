@@ -66,11 +66,6 @@ bool ProxyBase::InitSocket()
 			throw "Create a new socket failed.";
 		}
 
-		//unsigned long sockMode(1);
-		//if (ioctlsocket(SockHandle, FIONBIO, &sockMode) != NO_ERROR) {
-		//	LOG(Warning, "Set non-blocking method failed.");
-		//}
-
 		SockState = ESocketState::Initialized;
 		LOG(Log, "Socket initialized...");
 
