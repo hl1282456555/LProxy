@@ -39,6 +39,12 @@ void ProxyServer::Run()
 		SOCKET acceptSock = accept(SockHandle, (SOCKADDR*)&acceptAddr, &len);
 		if (acceptSock != SOCKET_ERROR) {
 
+			// Make client socket enable non-blocking method
+			unsigned long sockMode(1);
+			if (ioctlsocket(acceptSock, FIONBIO, &sockMode) != NO_ERROR) {
+			LOG(Warning, "Set non-blocking method failed.");
+			}
+
 			char acceptHost[16] = { 0 };
 			InetNtopA(AF_INET, &acceptAddr.sin_addr, acceptHost, 16);
 			LOG(Log, "Accept a new client, addr: %s, port: %d", acceptHost, acceptAddr.sin_port);
