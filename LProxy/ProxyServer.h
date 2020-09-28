@@ -2,7 +2,7 @@
 #define PROXY_SERVER_H
 
 #include "ProxyBase.h"
-#include "ClientSocket.h"
+#include "ProxyContext.h"
 
 #include <mutex>
 #include <queue>
@@ -23,8 +23,8 @@ protected:
 	static std::once_flag InstanceOnceFlag;
 	static std::shared_ptr<ProxyServer> Instance;
 
-	std::queue<std::shared_ptr<ClientSocket>> PendingQueue;
-	std::queue<std::shared_ptr<ClientSocket>> DestroyQueue;
+	std::queue<std::shared_ptr<ProxyContext>> PendingQueue;
+	std::queue<std::shared_ptr<ProxyContext>> DestroyQueue;
 
 	std::mutex PendingLock;
 	std::mutex DestroyLock;

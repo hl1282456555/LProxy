@@ -49,7 +49,7 @@ void ProxyServer::Run()
 			InetNtopA(AF_INET, &acceptAddr.sin_addr, acceptHost, 16);
 			LOG(Log, "[Server]Accept a new client, addr: %s, port: %d", acceptHost, acceptAddr.sin_port);
 
-			std::shared_ptr<ClientSocket> client(new ClientSocket(acceptAddr, acceptSock));
+			std::shared_ptr<ProxyContext> client(new ProxyContext(acceptAddr, acceptSock));
 
 			std::lock_guard<std::mutex> pendingScope(PendingLock);
 			PendingQueue.push(client);
@@ -73,7 +73,7 @@ void ProxyServer::ProcessRequest()
 			continue;
 		}
 		
-		std::shared_ptr<ClientSocket> client = PendingQueue.front();
+		std::shared_ptr<ProxyContext> client = PendingQueue.front();
 		PendingQueue.pop();
 
 		std::chrono::system_clock::time_point currentTime = std::chrono::system_clock::now();
