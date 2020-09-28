@@ -35,15 +35,10 @@ void ProxyServer::Run()
 	while (SockHandle != INVALID_SOCKET)
 	{
 		SOCKADDR_IN acceptAddr;
+		std::memset(&acceptAddr, 0, sizeof(SOCKADDR_IN));
 		int len = sizeof(SOCKADDR);
 		SOCKET acceptSock = accept(SockHandle, (SOCKADDR*)&acceptAddr, &len);
 		if (acceptSock != SOCKET_ERROR) {
-
-			// Make client socket enable non-blocking method
-			unsigned long sockMode(1);
-			if (ioctlsocket(acceptSock, FIONBIO, &sockMode) != NO_ERROR) {
-			LOG(Warning, "[Server]Set non-blocking method failed.");
-			}
 
 			char acceptHost[16] = { 0 };
 			InetNtopA(AF_INET, &acceptAddr.sin_addr, acceptHost, 16);
@@ -51,15 +46,19 @@ void ProxyServer::Run()
 
 			std::shared_ptr<ProxyContext> client(new ProxyContext(acceptAddr, acceptSock));
 
-			std::lock_guard<std::mutex> pendingScope(PendingLock);
-			PendingQueue.push(client);
-
-			std::lock_guard<std::mutex> destroyScope(DestroyLock);
-			if (DestroyQueue.empty()) {
-				continue;
+			{
+				std::lock_guard<std::mutex> pendingScope(PendingLock);
+				PendingQueue.push(client);
 			}
-			DestroyQueue.front().reset();
-			DestroyQueue.pop();
+
+			{
+				std::lock_guard<std::mutex> destroyScope(DestroyLock);
+				if (DestroyQueue.empty()) {
+					continue;
+				}
+				DestroyQueue.front().reset();
+				DestroyQueue.pop();
+			}
 		}
 	}
 }
@@ -68,13 +67,16 @@ void ProxyServer::ProcessRequest()
 {
 	while (!bStopServer)
 	{
+
 		std::lock_guard<std::mutex> pendingScope(PendingLock);
 		if (PendingQueue.empty()) {
 			continue;
 		}
-		
+
 		std::shared_ptr<ProxyContext> client = PendingQueue.front();
 		PendingQueue.pop();
+		
+		
 
 		std::chrono::system_clock::time_point currentTime = std::chrono::system_clock::now();
 		std::chrono::seconds timeOut(15);
@@ -97,38 +99,35 @@ void ProxyServer::ProcessRequest()
 				break;
 			}
 
-			LOG(Warning, "[Client: %s]Try to process handshake with client failed, will drop this connection.", client->GetGuid().c_str());
+			LOG(Warning, "[Connection: %s]Try to process handshake with client failed, will drop this connection.", client->GetGuid().c_str());
 			bShouldDestroy = true;
 			break;
 		}
-
 		case EConnectionState::Handshark:
 		{
 			if (client->ProcessLicenseCheck()) {
-				LOG(Log, "[Client: %s]Data travel startup.", client->GetGuid().c_str());
+				LOG(Log, "[Connection: %s]Data travel startup.", client->GetGuid().c_str());
 				break;
 			}
 
-			LOG(Warning, "[Client: %s]Try to process license check failed, will drop this connection.", client->GetGuid().c_str());
+			LOG(Warning, "[Connection: %s]Try to process license check failed, will drop this connection.", client->GetGuid().c_str());
 			bShouldDestroy = true;
 			break;
 		}
-		
 		case EConnectionState::Connected:
 		{
 			client->ProcessForwardData();
 			break;
 		}
-
 		case EConnectionState::RequestClose:
 		{
-			LOG(Log, "[Client %s]Client request close, will drop this connection.", client->GetGuid().c_str());
+			LOG(Log, "[Connection %s]Client request close, will drop this connection.", client->GetGuid().c_str());
 			bShouldDestroy = true;
 			break;
 		}
 		default:
 		{
-			LOG(Warning, "[Client: %s]Wrong connection state.", client->GetGuid().c_str());
+			LOG(Warning, "[Connection: %s]Wrong connection state.", client->GetGuid().c_str());
 			bShouldDestroy = true;
 			break;
 		}
@@ -141,5 +140,7 @@ void ProxyServer::ProcessRequest()
 		else {
 			PendingQueue.push(client);
 		}
+
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
 	}
 }

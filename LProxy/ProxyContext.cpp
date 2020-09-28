@@ -67,11 +67,6 @@ bool ProxyContext::ProcessHandshake()
 	LOG(Log, "[Connection: %s]Processing handshake.", Guid.c_str());
 	StartTime = std::chrono::system_clock::now();
 
-	if (!CanOperate(SockHandle, EOperationType::Read)) {
-		LOG(Log, "[Connection: %s]Can't read data from this connection.", Guid.c_str());
-		return false;
-	}
-
 	static const int handshakeBufferSize = 1 + 1 + 255;
 	char handshakeBuffer[handshakeBufferSize];
 
@@ -117,6 +112,8 @@ bool ProxyContext::ProcessHandshake()
 		SendHandshakeResponse(EConnectionProtocol::Error);
 		return false;
 	}
+
+	State = EConnectionState::Handshark;
 
 	return SendHandshakeResponse(EConnectionProtocol::Non_auth);
 }
@@ -191,6 +188,8 @@ bool ProxyContext::ProcessLicenseCheck()
 		return false;
 	}
 
+	State = EConnectionState::CheckLicense;
+
 	switch (payload.Cmd)
 	{
 	case ECommandType::Connect:
@@ -225,6 +224,12 @@ bool ProxyContext::ProcessConnectCmd(const TravelPayload& Payload)
 		LOG(Warning, "[Connection: %s]Create a new socket for transport failed, code: %d", Guid.c_str(), WSAGetLastError());
 		SendLicenseResponse(Payload, ETravelResponse::GeneralFailure);
 		return false;
+	}
+
+	// Make client socket enable non-blocking method
+	unsigned long sockMode(1);
+	if (ioctlsocket(TransportSockHandle, FIONBIO, &sockMode) != NO_ERROR) {
+		LOG(Warning, "[Connection: %s]Set non-blocking method failed.", Guid.c_str());
 	}
 
 	std::memset(&TransportAddr, 0, sizeof(TransportAddr));
@@ -281,23 +286,22 @@ bool ProxyContext::ProcessConnectCmd(const TravelPayload& Payload)
 	}
 	}
 
-	if (connect(TransportSockHandle, (SOCKADDR*)&destAddr, sizeof(SOCKADDR)) == SOCKET_ERROR) {
-		LOG(Warning, "[Connection: %s]Connect to destination server failed, code: %d", Guid.c_str(), WSAGetLastError());
-		return false;
+	connect(TransportSockHandle, (SOCKADDR*)&destAddr, sizeof(SOCKADDR));
+	if (!CanOperate(TransportSockHandle, EOperationType::Write)) {
+		LOG(Log, "[Connection: %s]Connect to destination server failure.", Guid.c_str());
+		State = EConnectionState::RequestClose;
+		return SendLicenseResponse(Payload, ETravelResponse::GeneralFailure);
 	}
+	
 
 	LOG(Log, "[Connection: %s]Connect to destination server succeeded.", Guid.c_str());
+	State = EConnectionState::Connected;
 
 	return SendLicenseResponse(Payload, ETravelResponse::Succeeded);
 }
 
 bool ProxyContext::SendHandshakeResponse(EConnectionProtocol Response)
 {
-	if (!CanOperate(SockHandle, EOperationType::Write)) {
-		LOG(Warning, "[Connection: %s]Can't write handshake reponse into connection.", Guid.c_str());
-		return false;
-	}
-
 	HandshakeResponse response;
 	response.Version = ESocksVersion::Socks5;
 	response.Method = Response;
@@ -322,11 +326,6 @@ bool ProxyContext::SendLicenseResponse(const TravelPayload& Payload, ETravelResp
 		return false;
 	}
 
-	if (!CanOperate(SockHandle, EOperationType::Write)) {
-		LOG(Warning, "[Connection: %s]Can't write license reponse into connection.", Guid.c_str());
-		return false;
-	}
-
 	TravelReply reply;
 	reply.Version = Payload.Version;
 	reply.Reply = Response;
@@ -345,7 +344,7 @@ bool ProxyContext::SendLicenseResponse(const TravelPayload& Payload, ETravelResp
 	replyData.insert(replyData.end(), reply.BindPort.begin(), reply.BindPort.end());
 
 	if (send(SockHandle, replyData.data(), static_cast<int>(replyData.size()), 0) == SOCKET_ERROR) {
-		LOG(Warning, "[Connection: %s]Send response of license check failed.", Guid.c_str());
+		LOG(Warning, "[Connection: %s]Send response of license check failed, code: %d.", Guid.c_str(), WSAGetLastError());
 		return false;
 	}
 
@@ -361,18 +360,47 @@ void ProxyContext::ProcessForwardData()
 	int traffic = 0;
 
 	char transportBuffer[SOCK_BUFFER_SIZE];
-	int result = recv(TransportSockHandle, transportBuffer, SOCK_BUFFER_SIZE, 0);
-	if (result != SOCKET_ERROR && result > 0) {
-		traffic += result;
-		send(SockHandle, transportBuffer, 4096, 0);
+
+	FD_SET sockSet;
+	FD_ZERO(&sockSet);
+	FD_SET(SockHandle, &sockSet);
+	FD_SET(TransportSockHandle, &sockSet);
+
+	TIMEVAL timeout{5, 0};
+
+	int result = select(3, &sockSet, nullptr, nullptr, &timeout);
+	if (result == SOCKET_ERROR) {
+		return;
 	}
 
-	std::memset(transportBuffer, 0, SOCK_BUFFER_SIZE);
+	for (int index = 0; index < sockSet.fd_count; index++)
+	{
+		std::memset(transportBuffer, 0, SOCK_BUFFER_SIZE);
 
-	result = recv(SockHandle, transportBuffer, SOCK_BUFFER_SIZE, 0);
-	if (result != SOCKET_ERROR && result > 0) {
-		traffic += result;
-		send(TransportSockHandle, transportBuffer, SOCK_BUFFER_SIZE, 0);
+		SOCKET tempSock = sockSet.fd_array[index];
+		if (tempSock == SockHandle) {
+			result = recv(SockHandle, transportBuffer, SOCK_BUFFER_SIZE, 0);
+			if (result == SOCKET_ERROR || result == 0) {
+				LOG(Log, "[Connection: %s]Recv from SockHandle failed.", Guid.c_str());
+				continue;
+			}
+			result = send(TransportSockHandle, transportBuffer, result, 0);
+			if (result == SOCKET_ERROR) {
+				LOG(Log, "[Connection: %s]Send to TransportSockHandle failed.", Guid.c_str());
+			}
+		}
+		else {
+			result = recv(TransportSockHandle, transportBuffer, SOCK_BUFFER_SIZE, 0);
+			if (result == SOCKET_ERROR || result == 0) {
+				LOG(Log, "[Connection: %s]Recv from TransportSockHandle failed.", Guid.c_str());
+				continue;
+			}
+
+			result = send(SockHandle, transportBuffer, result, 0);
+			if (result == SOCKET_ERROR) {
+				LOG(Log, "[Connection: %s]Send to SockHandle failed.", Guid.c_str());
+			}
+		}
 	}
 
 	if (traffic > 0) {
