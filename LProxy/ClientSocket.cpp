@@ -336,3 +336,32 @@ bool ClientSocket::SendLicenseResponse(const TravelPayload& Payload, ETravelResp
 
 	return true;
 }
+
+void ClientSocket::ProcessForwardData()
+{
+	if (SockHandle == INVALID_SOCKET) {
+		return;
+	}
+
+	int traffic = 0;
+
+	char transportBuffer[SOCK_BUFFER_SIZE];
+	int result = recv(TransportSockHandle, transportBuffer, SOCK_BUFFER_SIZE, 0);
+	if (result != SOCKET_ERROR && result > 0) {
+		traffic += result;
+		send(SockHandle, transportBuffer, 4096, 0);
+	}
+
+	std::memset(transportBuffer, 0, SOCK_BUFFER_SIZE);
+
+	result = recv(SockHandle, transportBuffer, SOCK_BUFFER_SIZE, 0);
+	if (result != SOCKET_ERROR && result > 0) {
+		traffic += result;
+		send(TransportSockHandle, transportBuffer, SOCK_BUFFER_SIZE, 0);
+	}
+
+	if (traffic > 0) {
+		StartTime = std::chrono::system_clock::now();
+		LOG(Log, "[Client: %s]Forwarded data traffic: %dbytes", Guid.c_str(), traffic);
+	}
+}

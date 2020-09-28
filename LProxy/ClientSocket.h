@@ -36,6 +36,8 @@ public:
 
 	virtual bool SendLicenseResponse(const TravelPayload& Payload, ETravelResponse Response);
 
+	virtual void ProcessForwardData();
+
 protected:
 	SOCKADDR_IN Addr;
 	SOCKET		SockHandle;
