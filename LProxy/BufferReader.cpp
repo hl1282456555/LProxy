@@ -1,4 +1,5 @@
 #include "BufferReader.h"
+#include <cstring>
 
 BufferReader::BufferReader(const char* InData, int Count)
 	: BufferArchive(Count)
@@ -22,7 +23,7 @@ void BufferReader::Serialize(void* Buffer, int Count)
 		return;
 	}
 
-	std::memcpy(Buffer, InternalData + Offset, Count * sizeof(char));
+	std::memcpy(Buffer, InternalData + Offset, Count);
 
 	Offset += Count;
 }
