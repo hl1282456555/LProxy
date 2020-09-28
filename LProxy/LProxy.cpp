@@ -4,12 +4,17 @@
 #include <iostream>
 
 #include "ProxyServer.h"
+#include "EasyLog.h"
 
 int main()
 {
 	std::shared_ptr<ProxyServer> server = ProxyServer::Get();
 
-	server->InitSocket();
+	if (!server->InitSocket()) {
+		LOG(Error, "[Main]Init the proxy server failed.");
+		return -1;
+	}
+
 	server->Run();
 
 	return 0;
