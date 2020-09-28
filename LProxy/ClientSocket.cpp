@@ -11,7 +11,7 @@ ClientSocket::ClientSocket(SOCKADDR_IN InAddr, SOCKET InHandle)
 	, SockHandle(InHandle)
 	, TransportAddr()
 	, TransportSockHandle(INVALID_SOCKET)
-	, Guid(MiscHelper::NewGuid(16))
+	, Guid(MiscHelper::NewGuid(8))
 	, bRequestClose(false)
 	, State(EConnectionState::None)
 {
@@ -172,19 +172,22 @@ bool ClientSocket::ProcessLicenseCheck()
 	static const int transportBufferSize = 4096;
 	char requestBuffer[transportBufferSize] = { 0 };
 
+	TravelPayload payload;
+
 	int result = recv(SockHandle, requestBuffer, transportBufferSize, 0);
 	if (result == SOCKET_ERROR) {
 		LOG(Warning, "[Client: %s]", Guid.c_str());
+		SendLicenseResponse(payload, ETravelResponse::GeneralFailure);
 		return false;
 	}
 
 	BufferReader reader(requestBuffer, result);
 
-	TravelPayload payload;
 	reader.Serialize(&payload.Version, 1);
 
 	if (payload.Version != ESocksVersion::Socks5) {
 		LOG(Warning, "[Client: %s]Wrong protocol version.", Guid.c_str());
+		SendLicenseResponse(payload, ETravelResponse::RulesetNotAllowed);
 		return false;
 	}
 
@@ -193,6 +196,7 @@ bool ClientSocket::ProcessLicenseCheck()
 
 	if (payload.Reserved != 0x00) {
 		LOG(Warning, "[Client: %s]Wrong reserved field value.");
+		SendLicenseResponse(payload, ETravelResponse::GeneralFailure);
 		return false;
 	}
 
@@ -204,8 +208,8 @@ bool ClientSocket::ProcessLicenseCheck()
 	case EAddressType::IPv4:
 	{
 		payload.DestAddr.resize(4);
-		reader.Serialize(&payload.DestAddr, 4);
-		reader.Serialize(&payload.DestPort, 2);
+		reader.Serialize(payload.DestAddr.data(), 4);
+		reader.Serialize(payload.DestPort.data(), 2);
 		break;
 	}
 	case EAddressType::IPv6:
@@ -237,6 +241,7 @@ bool ClientSocket::ProcessLicenseCheck()
 	case ECommandType::Connect:
 	{
 		if (!ProcessConnectCmd(payload)) {
+			SendLicenseResponse(payload, ETravelResponse::GeneralFailure);
 			return false;
 		}
 		break;
@@ -244,11 +249,12 @@ bool ClientSocket::ProcessLicenseCheck()
 	case ECommandType::Bind:
 	case ECommandType::UDP:
 	default:
-		LOG(Warning, "[Client: %s]Not supported command.");
+		LOG(Warning, "[Client: %s]Not supported command.", Guid.c_str());
+		SendLicenseResponse(payload, ETravelResponse::CmdNotSupported);
 		return false;
 	}
 
-	return true;
+	return SendLicenseResponse(payload, ETravelResponse::Succeeded);;
 }
 
 bool ClientSocket::ProcessConnectCmd(const TravelPayload& Payload)
@@ -301,6 +307,8 @@ bool ClientSocket::SendHandshakeResponse(EConnectionProtocol Response)
 		LOG(Warning, "[Client: %s]Send handshake response failed.", Guid.c_str());
 		return false;
 	}
+
+	LOG(Log, "[Client: %s]Handshake response data send succeeded.", Guid.c_str());
 
 	return true;
 }
