@@ -7,9 +7,11 @@
 
 int main()
 {
-	ProxyServer server;
+	std::shared_ptr<ProxyServer> server = ProxyServer::Get();
 
-	server.Run();
+	server->InitSocket();
+	server->SetIP("127.0.0.1");
+	server->Run();
 
 	return 0;
 }
