@@ -7,6 +7,8 @@ enum class EConnectionState
 {
 	None = 0,
 	Handshark,
+	CheckLicense,
+	Connected,
 	RequestClose,
 };
 
@@ -37,16 +39,16 @@ struct HandshakePacket
 	int MethodNum;
 
 	// Methods
-	std::vector<char> MethodList;
+	std::vector<EConnectionProtocol> MethodList;
 };
 
 struct HandshakeResponse
 {
 	// Protocol version
-	char Version;
+	ESocksVersion Version;
 
 	// Choiced method
-	char Method;
+	EConnectionProtocol Method;
 };
 
 enum class ECommandType
