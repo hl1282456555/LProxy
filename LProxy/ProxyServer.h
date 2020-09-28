@@ -13,15 +13,19 @@ public:
 	ProxyServer();
 	virtual ~ProxyServer();
 
+	static std::shared_ptr<ProxyServer> Get();
+
 	virtual void Run();
 
 	virtual bool Listen();
 
 	static void SignalHandler(int Signal);
 
-	virtual void CloseClient(const ClientSocket& Client);
+	virtual void CloseClient(const std::shared_ptr<ClientSocket>& Client);
 
 protected:
+	static std::once_flag InstanceOnceFlag;
+	static std::shared_ptr<ProxyServer> Instance;
 	std::vector<std::shared_ptr<ClientSocket>>	ClientList;
 
 	std::mutex ClientListLock;
