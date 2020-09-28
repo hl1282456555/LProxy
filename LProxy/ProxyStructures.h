@@ -3,6 +3,8 @@
 
 #include <vector>
 
+#define SOCK_BUFFER_SIZE 4096
+
 enum class EConnectionState
 {
 	None = 0,
