@@ -21,6 +21,8 @@ ProxyBase::ProxyBase()
 	signal(SIGINT, ProxyBase::SignalHandler);
 
 	int concurrency = std::thread::hardware_concurrency() * 2;
+	LOG(Log, "[Server]Will create %d thread run on this machine.", concurrency);
+
 	for (int index = 0; index < concurrency; index++)
 	{
 		WorkerThreads.push_back(std::thread(std::bind(&ProxyBase::ProcessRequest, this)));
@@ -47,7 +49,7 @@ bool ProxyBase::InitSocket()
 			throw "Socket is already initialized, don't init twice.";
 		}
 
-		LOG(Log, "Initing socket...");
+		LOG(Log, "[Server]Initing socket...");
 
 		WSADATA wsaData;
 
@@ -63,11 +65,11 @@ bool ProxyBase::InitSocket()
 
 		SockHandle = socket(AF_INET, SOCK_STREAM, 0);
 		if (SockHandle == INVALID_SOCKET) {
-			throw "Create a new socket failed.";
+			throw "[Server]Create a new socket failed.";
 		}
 
 		SockState = ESocketState::Initialized;
-		LOG(Log, "Socket initialized...");
+		LOG(Log, "[Server]Socket initialized...");
 
 		SOCKADDR_IN serverAddr;
 		std::memset(&serverAddr, 0, sizeof(serverAddr));
@@ -77,21 +79,19 @@ bool ProxyBase::InitSocket()
 
 		if (bind(SockHandle, (SOCKADDR*)&serverAddr, sizeof(SOCKADDR)) == SOCKET_ERROR) {
 			SockState = ESocketState::Initialized;
-			LOG(Error, "Startup listen server failed, err: Bind server ip and port failed.");
-			return false;
+			throw std::exception("Startup listen server failed, err: Bind server ip and port failed.");
 		}
 
 		if (listen(SockHandle, SOMAXCONN) < 0) {
 			SockState = ESocketState::Initialized;
-			LOG(Error, "Startup listen server failed, err: Call listen failed.");
-			return false;
+			throw std::exception("Startup listen server failed, err: Call listen failed.");
 		}
 
 		SockState = ESocketState::Connecting;
 		return true;
 	}
 	catch (const std::exception& Err) {
-		LOG(Error, "Init socket failed, err: %s", Err.what());
+		LOG(Error, "[Server]Init socket failed, err: %s", Err.what());
 		return false;
 	}
 }

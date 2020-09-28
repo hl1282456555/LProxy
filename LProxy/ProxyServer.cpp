@@ -30,7 +30,7 @@ std::shared_ptr<ProxyServer> ProxyServer::Get()
 
 void ProxyServer::Run()
 {
-	LOG(Log, "Start listening...");
+	LOG(Log, "[Server]Start listening...");
 
 	while (SockHandle != INVALID_SOCKET)
 	{
@@ -42,12 +42,12 @@ void ProxyServer::Run()
 			// Make client socket enable non-blocking method
 			unsigned long sockMode(1);
 			if (ioctlsocket(acceptSock, FIONBIO, &sockMode) != NO_ERROR) {
-			LOG(Warning, "Set non-blocking method failed.");
+			LOG(Warning, "[Server]Set non-blocking method failed.");
 			}
 
 			char acceptHost[16] = { 0 };
 			InetNtopA(AF_INET, &acceptAddr.sin_addr, acceptHost, 16);
-			LOG(Log, "Accept a new client, addr: %s, port: %d", acceptHost, acceptAddr.sin_port);
+			LOG(Log, "[Server]Accept a new client, addr: %s, port: %d", acceptHost, acceptAddr.sin_port);
 
 			std::shared_ptr<ClientSocket> client(new ClientSocket(acceptAddr, acceptSock));
 
@@ -55,6 +55,9 @@ void ProxyServer::Run()
 			PendingQueue.push(client);
 
 			std::lock_guard<std::mutex> destroyScope(DestroyLock);
+			if (DestroyQueue.empty()) {
+				continue;
+			}
 			DestroyQueue.front().reset();
 			DestroyQueue.pop();
 		}
@@ -66,6 +69,10 @@ void ProxyServer::ProcessRequest()
 	while (!bStopServer)
 	{
 		std::lock_guard<std::mutex> pendingScope(PendingLock);
+		if (PendingQueue.empty()) {
+			continue;
+		}
+		
 		std::shared_ptr<ClientSocket> client = PendingQueue.front();
 		PendingQueue.pop();
 
@@ -73,7 +80,7 @@ void ProxyServer::ProcessRequest()
 		std::chrono::seconds timeOut(15);
 		std::chrono::duration passedTime = currentTime - client->GetStartTime();
 		if (passedTime >= timeOut) {
-			LOG(Log, "[Client: %s]Connection wait timeout.", client->GetGuid().c_str());
+			LOG(Log, "[Server]Connection wait timeout, connection uid: %s.", client->GetGuid().c_str());
 			std::lock_guard<std::mutex> destroyScope(DestroyLock);
 			DestroyQueue.push(client);
 			continue;
@@ -109,7 +116,7 @@ void ProxyServer::ProcessRequest()
 		
 		case EConnectionState::Connected:
 		{
-
+			client->ProcessForwardData();
 			break;
 		}
 
