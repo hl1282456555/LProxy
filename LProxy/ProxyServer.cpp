@@ -2,16 +2,14 @@
 #include "EasyLog.h"
 
 #include <WS2tcpip.h>
-#include <csignal>
 
-static bool bStopServer = false;
 std::once_flag ProxyServer::InstanceOnceFlag;
 std::shared_ptr<ProxyServer> ProxyServer::Instance;
 
 ProxyServer::ProxyServer()
 	: ProxyBase()
 {
-	signal(SIGINT, ProxyServer::SignalHandler);
+	
 }
 
 ProxyServer::~ProxyServer()
@@ -32,14 +30,9 @@ std::shared_ptr<ProxyServer> ProxyServer::Get()
 
 void ProxyServer::Run()
 {
-	
-	if (!Listen()) {
-		return;
-	}
-
 	LOG(Log, "Start listening...");
 
-	while (!bStopServer && SockHandle != INVALID_SOCKET)
+	while (SockHandle != INVALID_SOCKET)
 	{
 		SOCKADDR_IN acceptAddr;
 		int len = sizeof(SOCKADDR);
@@ -51,54 +44,89 @@ void ProxyServer::Run()
 			LOG(Log, "Accept a new client, addr: %s, port: %d", acceptHost, acceptAddr.sin_port);
 
 			std::shared_ptr<ClientSocket> client(new ClientSocket(acceptAddr, acceptSock));
-			if (client->InitConnection()) {
-				ClientList.push_back(client);
-			}
+
+			std::lock_guard<std::mutex> pendingScope(PendingLock);
+			PendingQueue.push(client);
+
+			std::lock_guard<std::mutex> destroyScope(DestroyLock);
+			DestroyQueue.front().reset();
+			DestroyQueue.pop();
 		}
 	}
 }
 
-bool ProxyServer::Listen()
+void ProxyServer::ProcessRequest()
 {
+	while (!bStopServer)
+	{
+		std::lock_guard<std::mutex> pendingScope(PendingLock);
+		std::shared_ptr<ClientSocket> client = PendingQueue.front();
+		PendingQueue.pop();
 
-	if (!IsValid()) {
-		SockState = ESocketState::Initialized;
-		LOG(Error, "Startup listen server failed, err: The socket not initialized.");
-		return false;
-	}
+		std::chrono::system_clock::time_point currentTime = std::chrono::system_clock::now();
+		std::chrono::seconds timeOut(15);
+		std::chrono::duration passedTime = currentTime - client->GetStartTime();
+		if (passedTime >= timeOut) {
+			LOG(Log, "[Client: %s]Connection wait timeout.", client->GetGuid().c_str());
+			std::lock_guard<std::mutex> destroyScope(DestroyLock);
+			DestroyQueue.push(client);
+			continue;
+		}
 
-	SOCKADDR_IN serverAddr;
-	std::memset(&serverAddr, 0, sizeof(serverAddr));
-	serverAddr.sin_family = AF_INET;
-	serverAddr.sin_port = htons(SockPort);
-	InetPtonA(AF_INET, SockIP.c_str(), &serverAddr.sin_addr.S_un);
+		bool bShouldDestroy = false;
 
-	if (bind(SockHandle, (SOCKADDR*)&serverAddr, sizeof(SOCKADDR)) == SOCKET_ERROR) {
-		SockState = ESocketState::Initialized;
-		LOG(Error, "Startup listen server failed, err: Bind server ip and port failed.");
-		return false;
-	}
+		EConnectionState clientState = client->GetState();
+		switch (clientState)
+		{
+		case EConnectionState::None:
+		{
+			if (client->ProcessHandshake()) {
+				break;
+			}
 
-	if (listen(SockHandle, SOMAXCONN) < 0) {
-		SockState = ESocketState::Initialized;
-		LOG(Error, "Startup listen server failed, err: Call listen failed.");
-		return false;
-	}
+			LOG(Warning, "[Client: %s]Try to process handshake with client failed, will drop this connection.", client->GetGuid().c_str());
+			bShouldDestroy = true;
+			break;
+		}
 
-	SockState = ESocketState::Connecting;
-	return true;
-}
+		case EConnectionState::Handshark:
+		{
+			if (client->ProcessLicenseCheck()) {
+				LOG(Log, "[Client: %s]Data travel startup.", client->GetGuid().c_str());
+				break;
+			}
 
-void ProxyServer::SignalHandler(int Signal)
-{
-	bStopServer = true;
-}
+			LOG(Warning, "[Client: %s]Try to process license check failed, will drop this connection.", client->GetGuid().c_str());
+			bShouldDestroy = true;
+			break;
+		}
+		
+		case EConnectionState::Connected:
+		{
 
-void ProxyServer::CloseClient(const std::shared_ptr<ClientSocket>& Client)
-{
-	std::lock_guard<std::mutex> clientListScope(ClientListLock);
+			break;
+		}
 
-	if (std::remove_if(ClientList.begin(), ClientList.end(), [&](const std::shared_ptr<ClientSocket>& Other) { return Client == Other; }) == ClientList.end()) {
-		LOG(Warning, "The client specified for destruction was not found.");
+		case EConnectionState::RequestClose:
+		{
+			LOG(Log, "[Client %s]Client request close, will drop this connection.", client->GetGuid().c_str());
+			bShouldDestroy = true;
+			break;
+		}
+		default:
+		{
+			LOG(Warning, "[Client: %s]Wrong connection state.", client->GetGuid().c_str());
+			bShouldDestroy = true;
+			break;
+		}
+		}
+
+		if (bShouldDestroy) {
+			std::lock_guard<std::mutex> destroyScope(DestroyLock);
+			DestroyQueue.push(client);
+		}
+		else {
+			PendingQueue.push(client);
+		}
 	}
 }

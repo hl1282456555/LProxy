@@ -4,8 +4,8 @@
 #include "ProxyBase.h"
 #include "ClientSocket.h"
 
-#include <vector>
 #include <mutex>
+#include <queue>
 
 class ProxyServer : public ProxyBase
 {
@@ -17,18 +17,17 @@ public:
 
 	virtual void Run();
 
-	virtual bool Listen();
-
-	static void SignalHandler(int Signal);
-
-	virtual void CloseClient(const std::shared_ptr<ClientSocket>& Client);
+	virtual void ProcessRequest() override;
 
 protected:
 	static std::once_flag InstanceOnceFlag;
 	static std::shared_ptr<ProxyServer> Instance;
-	std::vector<std::shared_ptr<ClientSocket>>	ClientList;
 
-	std::mutex ClientListLock;
+	std::queue<std::shared_ptr<ClientSocket>> PendingQueue;
+	std::queue<std::shared_ptr<ClientSocket>> DestroyQueue;
+
+	std::mutex PendingLock;
+	std::mutex DestroyLock;
 };
 
 #endif // !PROXY_SERVER_H

@@ -1,6 +1,16 @@
 #include "ProxyBase.h"
 #include "EasyLog.h"
 
+#include <WS2tcpip.h>
+#include <csignal>
+
+bool ProxyBase::bStopServer = false;
+
+void ProxyBase::SignalHandler(int Signal)
+{
+	bStopServer = true;
+}
+
 ProxyBase::ProxyBase()
 	: SockIP("localhost")
 	, SockPort(1080)
@@ -8,7 +18,15 @@ ProxyBase::ProxyBase()
 	, SockHandle(INVALID_SOCKET)
 	, SockState(ESocketState::NotInit)
 {
+	signal(SIGINT, ProxyBase::SignalHandler);
 
+	int concurrency = std::thread::hardware_concurrency();
+	for (int index = 0; index < concurrency; index++)
+	{
+		WorkerThreads.push_back(std::thread(std::bind(&ProxyBase::ProcessRequest, this)));
+
+		WorkerThreads.back().detach();
+	}
 }
 
 ProxyBase::~ProxyBase()
@@ -48,14 +66,33 @@ bool ProxyBase::InitSocket()
 			throw "Create a new socket failed.";
 		}
 
-		//unsigned long sockMode(1);
-		//if (ioctlsocket(SockHandle, FIONBIO, &sockMode) != NO_ERROR) {
-		//	LOG(Warning, "Set non-blocking method failed.");
-		//}
+		unsigned long sockMode(1);
+		if (ioctlsocket(SockHandle, FIONBIO, &sockMode) != NO_ERROR) {
+			LOG(Warning, "Set non-blocking method failed.");
+		}
 
 		SockState = ESocketState::Initialized;
 		LOG(Log, "Socket initialized...");
 
+		SOCKADDR_IN serverAddr;
+		std::memset(&serverAddr, 0, sizeof(serverAddr));
+		serverAddr.sin_family = AF_INET;
+		serverAddr.sin_port = htons(SockPort);
+		InetPtonA(AF_INET, SockIP.c_str(), &serverAddr.sin_addr.S_un);
+
+		if (bind(SockHandle, (SOCKADDR*)&serverAddr, sizeof(SOCKADDR)) == SOCKET_ERROR) {
+			SockState = ESocketState::Initialized;
+			LOG(Error, "Startup listen server failed, err: Bind server ip and port failed.");
+			return false;
+		}
+
+		if (listen(SockHandle, SOMAXCONN) < 0) {
+			SockState = ESocketState::Initialized;
+			LOG(Error, "Startup listen server failed, err: Call listen failed.");
+			return false;
+		}
+
+		SockState = ESocketState::Connecting;
 		return true;
 	}
 	catch (const std::exception& Err) {

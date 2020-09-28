@@ -3,6 +3,8 @@
 
 #include <string>
 #include <WinSock2.h>
+#include <thread>
+#include <vector>
 
 enum class ESocketState
 {
@@ -35,12 +37,20 @@ public:
 
 	virtual void Run() = 0;
 
+	static void SignalHandler(int Signal);
+
+	virtual void ProcessRequest() = 0;
+
 protected:
 	std::string	SockIP;
 	int SockPort;
 	bool bAnyAddr;
 	SOCKET SockHandle;
 	ESocketState SockState;
+
+	static bool bStopServer;
+
+	std::vector<std::thread> WorkerThreads;
 };
 
 

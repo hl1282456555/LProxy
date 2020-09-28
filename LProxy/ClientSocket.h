@@ -6,6 +6,7 @@
 #include <WinSock2.h>
 #include <string>
 #include <vector>
+#include <chrono>
 
 class ClientSocket
 {
@@ -13,9 +14,17 @@ public:
 	ClientSocket(SOCKADDR_IN InAddr, SOCKET	InHandle);
 	virtual ~ClientSocket();
 
-	virtual bool InitConnection();
+	virtual void Close();
 
 	bool operator==(const ClientSocket& Other) const;
+
+	virtual inline std::string GetGuid();
+
+	virtual inline EConnectionState GetState();
+
+	virtual inline std::chrono::system_clock::time_point GetStartTime();
+
+	virtual inline void SetStartTime(const std::chrono::system_clock::time_point& InTime);
 
 	virtual bool ProcessHandshake();
 
@@ -36,6 +45,8 @@ protected:
 	SOCKET		TransportSockHandle;
 
 	EConnectionState State;
+
+	std::chrono::system_clock::time_point StartTime;
 };
 
 #endif // !CLIENT_SOCKET_H

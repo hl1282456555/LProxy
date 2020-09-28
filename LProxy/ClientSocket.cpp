@@ -15,7 +15,7 @@ ClientSocket::ClientSocket(SOCKADDR_IN InAddr, SOCKET InHandle)
 	, Guid(MiscHelper::NewGuid(8))
 	, State(EConnectionState::None)
 {
-
+	StartTime = std::chrono::system_clock::now();
 }
 
 ClientSocket::~ClientSocket()
@@ -32,26 +32,9 @@ ClientSocket::~ClientSocket()
 
 }
 
-bool ClientSocket::InitConnection()
+void ClientSocket::Close()
 {
-	if (SockHandle == INVALID_SOCKET) {
-		LOG(Warning, "[Client: %s]Can't init connection with INVALID_SOCKET.", Guid.c_str());
-		return false;
-	}
-
-	if (!ProcessHandshake()) {
-		LOG(Warning, "[Client: %s]Try to process handshake with client failed.", Guid.c_str());
-		return false;
-	}
-
-	if (!ProcessLicenseCheck()) {
-		LOG(Warning, "[Client: %s]Try to process license check failed.", Guid.c_str());
-		return false;
-	}
-
-	LOG(Log, "[Client: %s]Data travel startup.", Guid.c_str());
-
-	return true;
+	State = EConnectionState::RequestClose;
 }
 
 bool ClientSocket::operator==(const ClientSocket& Other) const
@@ -59,9 +42,31 @@ bool ClientSocket::operator==(const ClientSocket& Other) const
 	return Guid == Other.Guid;
 }
 
+std::string ClientSocket::GetGuid()
+{
+	return Guid;
+}
+
+EConnectionState ClientSocket::GetState()
+{
+	return State;
+}
+
+std::chrono::system_clock::time_point ClientSocket::GetStartTime()
+{
+	return StartTime;
+}
+
+void ClientSocket::SetStartTime(const std::chrono::system_clock::time_point& InTime)
+{
+	StartTime = InTime;
+}
+
 bool ClientSocket::ProcessHandshake()
 {
 	LOG(Log, "[Client: %s]Processing handshake.", Guid.c_str());
+	StartTime = std::chrono::system_clock::now();
+
 	static const int handshakeBufferSize = 1 + 1 + 255;
 	char handshakeBuffer[handshakeBufferSize];
 
@@ -114,6 +119,8 @@ bool ClientSocket::ProcessHandshake()
 bool ClientSocket::ProcessLicenseCheck()
 {
 	LOG(Log, "[Client: %s]Processing transport.", Guid.c_str());
+	StartTime = std::chrono::system_clock::now();
+
 	static const int transportBufferSize = 4096;
 	char requestBuffer[transportBufferSize] = { 0 };
 
