@@ -27,7 +27,7 @@ public:
 	virtual inline bool GetAnyAddr() { return bAnyAddr; }
 	virtual inline void SetAnyAddr(bool bAny) { bAnyAddr = bAny; }
 
-	virtual inline bool IsValid() { return SockHandle != NULL; }
+	virtual inline bool IsValid() { return SockHandle != INVALID_SOCKET; }
 
 	virtual inline ESocketState GetState() { return SockState; }
 
