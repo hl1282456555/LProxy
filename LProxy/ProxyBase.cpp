@@ -20,7 +20,7 @@ ProxyBase::ProxyBase()
 {
 	signal(SIGINT, ProxyBase::SignalHandler);
 
-	int concurrency = std::thread::hardware_concurrency();
+	int concurrency = std::thread::hardware_concurrency() * 2;
 	for (int index = 0; index < concurrency; index++)
 	{
 		WorkerThreads.push_back(std::thread(std::bind(&ProxyBase::ProcessRequest, this)));
