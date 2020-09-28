@@ -33,10 +33,10 @@ enum class ESocksVersion
 struct HandshakePacket
 {
 	// Protocol version
-	ESocksVersion Version;
+	ESocksVersion Version{ESocksVersion::None};
 
 	// Number of method
-	int MethodNum;
+	int MethodNum{0};
 
 	// Methods
 	std::vector<EConnectionProtocol> MethodList;
@@ -45,10 +45,10 @@ struct HandshakePacket
 struct HandshakeResponse
 {
 	// Protocol version
-	ESocksVersion Version;
+	ESocksVersion Version{ESocksVersion::None};
 
 	// Choiced method
-	EConnectionProtocol Method;
+	EConnectionProtocol Method{EConnectionProtocol::Non_auth};
 };
 
 enum class ECommandType
@@ -68,13 +68,13 @@ enum class EAddressType
 struct TravelPayload
 {
 	// Protocol version
-	ESocksVersion Version;
+	ESocksVersion Version{ESocksVersion::None};
 
 	/**
 	* Connect command
 	* @see ECommandType
 	*/
-	ECommandType Cmd;
+	ECommandType Cmd{ECommandType::Connect};
 
 	/**
 	* Reserved field, not used now.
@@ -86,7 +86,7 @@ struct TravelPayload
 	* target address type
 	* @See EAddressType
 	*/
-	EAddressType AddressType;
+	EAddressType AddressType{EAddressType::IPv4};
 
 	/**
 	* Desired destination address
@@ -121,13 +121,13 @@ enum class ETravelResponse
 struct TravelReply
 {
 	// Protocol version
-	ESocksVersion Version;
+	ESocksVersion Version{ESocksVersion::None};
 
 	/**
 	* Reply field
 	* @see ETravelResponse
 	*/
-	ETravelResponse Reply;
+	ETravelResponse Reply{ETravelResponse::Succeeded};
 
 	/**
 	* Reserved field
@@ -139,7 +139,7 @@ struct TravelReply
 	* Address type of following address
 	* @see EAddressType
 	*/
-	EAddressType AddressType;
+	EAddressType AddressType{EAddressType::IPv4};
 
 	/**
 	* Server bound address
