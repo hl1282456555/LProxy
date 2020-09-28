@@ -48,13 +48,7 @@ void ProxyServer::Run()
 
 			char acceptHost[16] = { 0 };
 			InetNtopA(AF_INET, &acceptAddr.sin_addr, acceptHost, 16);
-			LOG(Log, "Accept a new client, addr: %s", acceptHost);
-
-			if (ClientList.size() >= std::thread::hardware_concurrency()) {
-				LOG(Warning, "Can't accept more client, no more cpu core for it, will close this client socket.");
-				closesocket(acceptSock);
-				continue;
-			}
+			LOG(Log, "Accept a new client, addr: %s, port: %d", acceptHost, acceptAddr.sin_port);
 
 			std::shared_ptr<ClientSocket> client(new ClientSocket(acceptAddr, acceptSock));
 			if (client->InitConnection()) {
@@ -62,7 +56,6 @@ void ProxyServer::Run()
 			}
 		}
 	}
-	
 }
 
 bool ProxyServer::Listen()
