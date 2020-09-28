@@ -3,6 +3,7 @@
 #include "BufferReader.h"
 #include "ProxyServer.h"
 
+#include <WinSock2.h>
 #include <WS2tcpip.h>
 #include <vector>
 
@@ -12,7 +13,6 @@ ClientSocket::ClientSocket(SOCKADDR_IN InAddr, SOCKET InHandle)
 	, TransportAddr()
 	, TransportSockHandle(INVALID_SOCKET)
 	, Guid(MiscHelper::NewGuid(8))
-	, bRequestClose(false)
 	, State(EConnectionState::None)
 {
 
@@ -51,62 +51,7 @@ bool ClientSocket::InitConnection()
 
 	LOG(Log, "[Client: %s]Data travel startup.", Guid.c_str());
 
-	std::thread clientThread(
-	[&]()
-	{
-		static const int transportBufferSize = 4096;
-		char transportBuffer[transportBufferSize];
-
-		while (!bRequestClose && SockHandle != INVALID_SOCKET && TransportSockHandle != INVALID_SOCKET)
-		{
-			int transportBytes = 0;
-
-			std::memset(transportBuffer, 0, transportBufferSize * sizeof(char));
-			int result = recv(SockHandle, transportBuffer, transportBufferSize, 0);
-			if (result == SOCKET_ERROR) {
-				LOG(Warning, "[Client: %s]Recv data from client failed.", Guid.c_str());
-				break;
-			}
-
-			transportBytes += result;
-
-			result = send(TransportSockHandle, transportBuffer, result, 0);
-			if (result == SOCKET_ERROR) {
-				LOG(Warning, "[Client: %s]Send data to destination server failed.", Guid.c_str());
-				break;
-			}
-
-			std::memset(transportBuffer, 0, transportBufferSize * sizeof(char));
-			result = recv(TransportSockHandle, transportBuffer, transportBufferSize, 0);
-			if (result == SOCKET_ERROR) {
-				LOG(Warning, "[Client: %s]Recv data from destination server failed.", Guid.c_str());
-				break;
-			}
-
-			transportBytes += result;
-
-			result = send(SockHandle, transportBuffer, result, 0);
-			if (result == SOCKET_ERROR) {
-				LOG(Warning, "[Client: %s]Send data to client failed.", Guid.c_str());
-				break;
-			}
-
-			LOG(Log, "[Client: %s]Transported buffer size: %d", transportBytes);
-		}
-
-		std::shared_ptr<ProxyServer> proxyServer = ProxyServer::Get();
-		proxyServer->CloseClient(std::shared_ptr<ClientSocket>(this));
-	});
-
-	clientThread.detach();
-
 	return true;
-}
-
-void ClientSocket::Close()
-{
-	bRequestClose = true;
-	State = EConnectionState::RequestClose;
 }
 
 bool ClientSocket::operator==(const ClientSocket& Other) const
@@ -172,17 +117,15 @@ bool ClientSocket::ProcessLicenseCheck()
 	static const int transportBufferSize = 4096;
 	char requestBuffer[transportBufferSize] = { 0 };
 
-	TravelPayload payload;
-
 	int result = recv(SockHandle, requestBuffer, transportBufferSize, 0);
 	if (result == SOCKET_ERROR) {
-		LOG(Warning, "[Client: %s]", Guid.c_str());
-		SendLicenseResponse(payload, ETravelResponse::GeneralFailure);
+		LOG(Warning, "[Client: %s]Can't recv data from client, code: %d", Guid.c_str(), WSAGetLastError());
 		return false;
 	}
 
 	BufferReader reader(requestBuffer, result);
-
+	
+	TravelPayload payload;
 	reader.Serialize(&payload.Version, 1);
 
 	if (payload.Version != ESocksVersion::Socks5) {
@@ -261,30 +204,73 @@ bool ClientSocket::ProcessConnectCmd(const TravelPayload& Payload)
 {
 	if (TransportSockHandle != INVALID_SOCKET) {
 		LOG(Warning, "[Client: %s]Processing travel.", Guid.c_str());
+		SendLicenseResponse(Payload, ETravelResponse::GeneralFailure);
 		return false;
 	}
 
 	TransportSockHandle = socket(AF_INET, SOCK_STREAM, 0);
 	if (TransportSockHandle == INVALID_SOCKET) {
+		LOG(Warning, "[Client: %s]Create a new socket for transport failed, code: %d", Guid.c_str(), WSAGetLastError());
+		SendLicenseResponse(Payload, ETravelResponse::GeneralFailure);
 		return false;
 	}
 
 	std::memset(&TransportAddr, 0, sizeof(TransportAddr));
 	TransportAddr.sin_family = AF_INET;
 	TransportAddr.sin_port = 0;
-	InetPtonA(AF_INET, "localhost", &TransportAddr.sin_addr.S_un);
+	InetPtonA(AF_INET, "localhost", &TransportAddr.sin_addr);
 
 	if (bind(TransportSockHandle, (SOCKADDR*)&TransportAddr, sizeof(SOCKADDR)) == SOCKET_ERROR) {
+		LOG(Warning, "[Client: %s]Bind address for transport socket failed, code: %d", Guid.c_str(), WSAGetLastError());
+		SendLicenseResponse(Payload, ETravelResponse::GeneralFailure);
 		return false;
 	}
 
 	SOCKADDR_IN destAddr;
 	std::memset(&destAddr, 0, sizeof(destAddr));
-	destAddr.sin_family = AF_INET;
-	std::memcpy(&destAddr.sin_port, Payload.DestPort.data(), 2 * sizeof(char));
-	InetPtonA(AF_INET, Payload.DestAddr.data(), &destAddr.sin_addr.S_un);
+	std::memcpy(&destAddr.sin_port, Payload.DestPort.data(), 2);
+	switch (Payload.AddressType)
+	{
+	case EAddressType::IPv4:
+	{
+		destAddr.sin_family = AF_INET;
 
-	if (connect(TransportSockHandle, (SOCKADDR*)&destAddr, sizeof(SOCKADDR) == SOCKET_ERROR)) {
+		InetPtonA(AF_INET, Payload.DestAddr.data(), &destAddr.sin_addr);
+		break;
+	}
+	case EAddressType::DomainName:
+	{
+		destAddr.sin_family = AF_INET;
+
+		ADDRINFO info, *result;
+		std::memset(&info, 0, sizeof(ADDRINFO));
+		info.ai_socktype = SOCK_STREAM;
+		info.ai_family = AF_INET;
+
+		int error = getaddrinfo(Payload.DestAddr.data(), nullptr, &info, &result);
+		if (error != 0) {
+			LOG(Warning, "[Client: %s]Convert hostname to ip address failed, err: %s.", Guid.c_str(), gai_strerrorA(error));
+			SendLicenseResponse(Payload, ETravelResponse::HostUnreachable);
+			return false;
+		}
+
+		destAddr.sin_addr = ((SOCKADDR_IN*)(result->ai_addr))->sin_addr;
+
+		freeaddrinfo(result);
+
+		break;
+	}
+	case EAddressType::IPv6:
+	{
+		destAddr.sin_family = AF_INET6;
+
+		InetPtonA(AF_INET6, Payload.DestAddr.data(), &destAddr.sin_addr);
+		break;
+	}
+	}
+
+	if (connect(TransportSockHandle, (SOCKADDR*)&destAddr, sizeof(SOCKADDR)) == SOCKET_ERROR) {
+		LOG(Warning, "[Client: %s]Connect to destination server failed, code: %d", Guid.c_str(), WSAGetLastError());
 		return false;
 	}
 

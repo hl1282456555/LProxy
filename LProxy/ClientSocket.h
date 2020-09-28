@@ -15,11 +15,7 @@ public:
 
 	virtual bool InitConnection();
 
-	virtual void Close();
-
 	bool operator==(const ClientSocket& Other) const;
-
-protected:
 
 	virtual bool ProcessHandshake();
 
@@ -38,8 +34,6 @@ protected:
 
 	SOCKADDR_IN TransportAddr;
 	SOCKET		TransportSockHandle;
-
-	bool bRequestClose;
 
 	EConnectionState State;
 };
