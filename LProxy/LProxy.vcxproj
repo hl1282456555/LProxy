@@ -157,7 +157,7 @@
   <ItemGroup>
     <ClCompile Include="BufferArchive.cpp" />
     <ClCompile Include="BufferReader.cpp" />
-    <ClCompile Include="ClientSocket.cpp" />
+    <ClCompile Include="ProxyContext.cpp" />
     <ClCompile Include="EasyLog.cpp" />
     <ClCompile Include="LProxy.cpp" />
     <ClCompile Include="MiscHelper.cpp" />
@@ -167,7 +167,7 @@
   <ItemGroup>
     <ClInclude Include="BufferArchive.h" />
     <ClInclude Include="BufferReader.h" />
-    <ClInclude Include="ClientSocket.h" />
+    <ClInclude Include="ProxyContext.h" />
     <ClInclude Include="EasyLog.h" />
     <ClInclude Include="json.hpp" />
     <ClInclude Include="MiscHelper.h" />
