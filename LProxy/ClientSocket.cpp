@@ -1,13 +1,17 @@
 #include "ClientSocket.h"
 #include "EasyLog.h"
 #include "BufferReader.h"
+#include "ProxyServer.h"
 
 #include <WS2tcpip.h>
+#include <vector>
 
 ClientSocket::ClientSocket(SOCKADDR_IN InAddr, SOCKET InHandle)
 	: Addr(InAddr)
 	, SockHandle(InHandle)
-	, Guid(MiscHelper::NewGuid(64))
+	, TransportAddr()
+	, TransportSockHandle(INVALID_SOCKET)
+	, Guid(MiscHelper::NewGuid(16))
 	, bRequestClose(false)
 	, State(EConnectionState::None)
 {
@@ -16,30 +20,85 @@ ClientSocket::ClientSocket(SOCKADDR_IN InAddr, SOCKET InHandle)
 
 ClientSocket::~ClientSocket()
 {
-	if (SockHandle == INVALID_SOCKET) {
-		return;
+	if (SockHandle != INVALID_SOCKET) {
+		closesocket(SockHandle);
+		SockHandle = INVALID_SOCKET;
 	}
 
-	closesocket(SockHandle);
+	if (TransportSockHandle != INVALID_SOCKET) {
+		closesocket(TransportSockHandle);
+		TransportSockHandle = INVALID_SOCKET;
+	}
+
 }
 
 bool ClientSocket::InitConnection()
 {
 	if (SockHandle == INVALID_SOCKET) {
-		LOG(Log, "[Client: %s]Can't init connection with INVALID_SOCKET.", Guid.c_str());
+		LOG(Warning, "[Client: %s]Can't init connection with INVALID_SOCKET.", Guid.c_str());
 		return false;
 	}
 
 	if (!ProcessHandshake()) {
 		LOG(Warning, "[Client: %s]Try to process handshake with client failed.", Guid.c_str());
-		HandshakeResponse response;
-		response.Version = static_cast<char>(ESocksVersion::Socks5);
-		response.Method = static_cast<char>(EConnectionProtocol::Error);
-		if (send(SockHandle, (const char*)&response, sizeof(response), 0) == SOCKET_ERROR) {
-			LOG(Warning, "[Client: %s]Send error response failed, code: %d", WSAGetLastError());
-		}
 		return false;
 	}
+
+	if (!ProcessLicenseCheck()) {
+		LOG(Warning, "[Client: %s]Try to process license check failed.", Guid.c_str());
+		return false;
+	}
+
+	LOG(Log, "[Client: %s]Data travel startup.", Guid.c_str());
+
+	std::thread clientThread(
+	[&]()
+	{
+		static const int transportBufferSize = 4096;
+		char transportBuffer[transportBufferSize];
+
+		while (!bRequestClose && SockHandle != INVALID_SOCKET && TransportSockHandle != INVALID_SOCKET)
+		{
+			int transportBytes = 0;
+
+			std::memset(transportBuffer, 0, transportBufferSize * sizeof(char));
+			int result = recv(SockHandle, transportBuffer, transportBufferSize, 0);
+			if (result == SOCKET_ERROR) {
+				LOG(Warning, "[Client: %s]Recv data from client failed.", Guid.c_str());
+				break;
+			}
+
+			transportBytes += result;
+
+			result = send(TransportSockHandle, transportBuffer, result, 0);
+			if (result == SOCKET_ERROR) {
+				LOG(Warning, "[Client: %s]Send data to destination server failed.", Guid.c_str());
+				break;
+			}
+
+			std::memset(transportBuffer, 0, transportBufferSize * sizeof(char));
+			result = recv(TransportSockHandle, transportBuffer, transportBufferSize, 0);
+			if (result == SOCKET_ERROR) {
+				LOG(Warning, "[Client: %s]Recv data from destination server failed.", Guid.c_str());
+				break;
+			}
+
+			transportBytes += result;
+
+			result = send(SockHandle, transportBuffer, result, 0);
+			if (result == SOCKET_ERROR) {
+				LOG(Warning, "[Client: %s]Send data to client failed.", Guid.c_str());
+				break;
+			}
+
+			LOG(Log, "[Client: %s]Transported buffer size: %d", transportBytes);
+		}
+
+		std::shared_ptr<ProxyServer> proxyServer = ProxyServer::Get();
+		proxyServer->CloseClient(std::shared_ptr<ClientSocket>(this));
+	});
+
+	clientThread.detach();
 
 	return true;
 }
@@ -64,57 +123,56 @@ bool ClientSocket::ProcessHandshake()
 	int result = recv(SockHandle, handshakeBuffer, handshakeBufferSize, 0);
 	if (result == SOCKET_ERROR || result < 3) {
 		LOG(Warning, "[Client: %s]Recv data from client failed, code: %d", Guid.c_str(), WSAGetLastError());
+		SendHandshakeResponse(EConnectionProtocol::Error);
 		return false;
 	}
 
+	BufferReader reader(handshakeBuffer, result);
+
 	HandshakePacket packet;
-	packet.Version = static_cast<ESocksVersion>(handshakeBuffer[0]);
-	packet.MethodNum = handshakeBuffer[1];
-	packet.MethodList.assign(handshakeBuffer + 2, handshakeBuffer + packet.MethodNum + 1);
+	reader.Serialize(&packet.Version, 1);
+	reader.Serialize(&packet.MethodNum, 1);
+
+	packet.MethodList.reserve(packet.MethodNum);
+	reader.Serialize(packet.MethodList.data(), packet.MethodNum);
 
 	if (packet.Version != ESocksVersion::Socks5) {
 		LOG(Warning, "[Client: %s]Wrong protocol version.", Guid.c_str());
+		SendHandshakeResponse(EConnectionProtocol::Error);
 		return false;
 	}
 
 	if (packet.MethodNum < 1) {
 		LOG(Warning, "[Client: %s]Wrong method length.", Guid.c_str());
+		SendHandshakeResponse(EConnectionProtocol::Error);
 		return false;
 	}
 
 	bool bFoundProtocol = false;
 
-	for (const char& protocol : packet.MethodList)
+	for (const EConnectionProtocol& protocol : packet.MethodList)
 	{
-		if (protocol == static_cast<char>(EConnectionProtocol::Non_auth)) {
+		if (protocol == EConnectionProtocol::Non_auth) {
 			bFoundProtocol = true;
 		}
 	}
 
 	if (!bFoundProtocol) {
 		LOG(Warning, "[Client: %s]Only support non-auth protocol now.", Guid.c_str());
+		SendHandshakeResponse(EConnectionProtocol::Error);
 		return false;
 	}
 
-	HandshakeResponse response;
-	response.Version = static_cast<char>(ESocksVersion::Socks5);
-	response.Method = static_cast<char>(EConnectionProtocol::Non_auth);
-
-	if (send(SockHandle, (const char*)&response, sizeof(response), 0) == SOCKET_ERROR) {
-		LOG(Warning, "[Client: %s]Send choiced mesthod response failed, code: %d", Guid.c_str(), WSAGetLastError());
-		return false;
-	}
-
-	return true;
+	return SendHandshakeResponse(EConnectionProtocol::Non_auth);
 }
 
 bool ClientSocket::ProcessLicenseCheck()
 {
-	LOG(Log, "[Client: %s]Processing travel.", Guid.c_str());
-	static const int travelBufferSize = 4096;
-	char requestBuffer[travelBufferSize] = { 0 };
+	LOG(Log, "[Client: %s]Processing transport.", Guid.c_str());
+	static const int transportBufferSize = 4096;
+	char requestBuffer[transportBufferSize] = { 0 };
 
-	int result = recv(SockHandle, requestBuffer, travelBufferSize, 0);
+	int result = recv(SockHandle, requestBuffer, transportBufferSize, 0);
 	if (result == SOCKET_ERROR) {
 		LOG(Warning, "[Client: %s]", Guid.c_str());
 		return false;
@@ -166,7 +224,7 @@ bool ClientSocket::ProcessLicenseCheck()
 		reader.Serialize(payload.DestAddr.data(), nameLen);
 		reader.Serialize(payload.DestPort.data(), 2);
 
-		payload.DestAddr.push_back('0x00');
+		payload.DestAddr.push_back(0x00);
 		break;
 	}
 	default:
@@ -178,7 +236,9 @@ bool ClientSocket::ProcessLicenseCheck()
 	{
 	case ECommandType::Connect:
 	{
-		return ProcessConnectCmd(payload);
+		if (!ProcessConnectCmd(payload)) {
+			return false;
+		}
 		break;
 	}
 	case ECommandType::Bind:
@@ -193,18 +253,22 @@ bool ClientSocket::ProcessLicenseCheck()
 
 bool ClientSocket::ProcessConnectCmd(const TravelPayload& Payload)
 {
-	SOCKET destSock = socket(AF_INET, SOCK_STREAM, 0);
-	if (destSock == INVALID_SOCKET) {
+	if (TransportSockHandle != INVALID_SOCKET) {
+		LOG(Warning, "[Client: %s]Processing travel.", Guid.c_str());
 		return false;
 	}
 
-	SOCKADDR_IN serverAddr;
-	std::memset(&serverAddr, 0, sizeof(serverAddr));
-	serverAddr.sin_family = AF_INET;
-	serverAddr.sin_port = 0;
-	InetPtonA(AF_INET, "localhost", &serverAddr.sin_addr.S_un);
+	TransportSockHandle = socket(AF_INET, SOCK_STREAM, 0);
+	if (TransportSockHandle == INVALID_SOCKET) {
+		return false;
+	}
 
-	if (bind(destSock, (SOCKADDR*)&serverAddr, sizeof(SOCKADDR)) == SOCKET_ERROR) {
+	std::memset(&TransportAddr, 0, sizeof(TransportAddr));
+	TransportAddr.sin_family = AF_INET;
+	TransportAddr.sin_port = 0;
+	InetPtonA(AF_INET, "localhost", &TransportAddr.sin_addr.S_un);
+
+	if (bind(TransportSockHandle, (SOCKADDR*)&TransportAddr, sizeof(SOCKADDR)) == SOCKET_ERROR) {
 		return false;
 	}
 
@@ -214,11 +278,60 @@ bool ClientSocket::ProcessConnectCmd(const TravelPayload& Payload)
 	std::memcpy(&destAddr.sin_port, Payload.DestPort.data(), 2 * sizeof(char));
 	InetPtonA(AF_INET, Payload.DestAddr.data(), &destAddr.sin_addr.S_un);
 
-	if (connect(destSock, (SOCKADDR*)&destAddr, sizeof(SOCKADDR) == SOCKET_ERROR)) {
+	if (connect(TransportSockHandle, (SOCKADDR*)&destAddr, sizeof(SOCKADDR) == SOCKET_ERROR)) {
 		return false;
 	}
 
 	LOG(Log, "[Client: %s]Connect to destination server succeeded.", Guid.c_str());
+
+	return SendLicenseResponse(Payload, ETravelResponse::Succeeded);
+}
+
+bool ClientSocket::SendHandshakeResponse(EConnectionProtocol Response)
+{
+	HandshakeResponse response;
+	response.Version = ESocksVersion::Socks5;
+	response.Method = Response;
+
+	std::vector<char> responseData;
+	responseData.push_back(static_cast<char>(response.Version));
+	responseData.push_back(static_cast<char>(response.Method));
+
+	if (send(SockHandle, responseData.data(), responseData.size(), 0) == SOCKET_ERROR) {
+		LOG(Warning, "[Client: %s]Send handshake response failed.", Guid.c_str());
+		return false;
+	}
+
+	return true;
+}
+
+bool ClientSocket::SendLicenseResponse(const TravelPayload& Payload, ETravelResponse Response)
+{
+	if (SockHandle == INVALID_SOCKET) {
+		return false;
+	}
+
+	TravelReply reply;
+	reply.Version = Payload.Version;
+	reply.Reply = Response;
+	reply.Reserved = 0x00;
+	reply.AddressType = Payload.AddressType;
+	reply.BindAddress = Payload.DestAddr;
+	reply.BindAddress.reserve(reply.BindAddress.size() - 1);
+	reply.BindPort = Payload.DestPort;
+
+	std::vector<char> replyData;
+	replyData.push_back(static_cast<char>(reply.Version));
+	replyData.push_back(static_cast<char>(reply.Reply));
+	replyData.push_back(static_cast<char>(reply.Reserved));
+	replyData.push_back(static_cast<char>(reply.AddressType));
+	replyData.insert(replyData.end(), reply.BindAddress.begin(), reply.BindAddress.end());
+	replyData.insert(replyData.end(), reply.BindPort.begin(), reply.BindPort.end());
+
+	if (send(SockHandle, replyData.data(), replyData.size(), 0) == SOCKET_ERROR) {
+		LOG(Warning, "[Client: %s]Send response of license check failed.", Guid.c_str());
+		return false;
+	}
 
 	return true;
 }

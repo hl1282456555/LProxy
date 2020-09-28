@@ -27,10 +27,17 @@ protected:
 
 	virtual bool ProcessConnectCmd(const TravelPayload& Payload);
 
+	virtual bool SendHandshakeResponse(EConnectionProtocol Response);
+
+	virtual bool SendLicenseResponse(const TravelPayload& Payload, ETravelResponse Response);
+
 protected:
 	SOCKADDR_IN Addr;
 	SOCKET		SockHandle;
 	std::string Guid;
+
+	SOCKADDR_IN TransportAddr;
+	SOCKET		TransportSockHandle;
 
 	bool bRequestClose;
 
