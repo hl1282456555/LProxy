@@ -39,7 +39,7 @@ public:
 
 	static void SignalHandler(int Signal);
 
-	virtual void ProcessRequest() = 0;
+	virtual void ProcessRequest();
 
 protected:
 	std::string	SockIP;

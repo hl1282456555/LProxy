@@ -11,6 +11,10 @@ void ProxyBase::SignalHandler(int Signal)
 	bStopServer = true;
 }
 
+void ProxyBase::ProcessRequest()
+{
+}
+
 ProxyBase::ProxyBase()
 	: SockIP("localhost")
 	, SockPort(1080)
