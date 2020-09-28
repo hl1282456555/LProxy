@@ -133,7 +133,7 @@ bool ClientSocket::ProcessHandshake()
 	reader.Serialize(&packet.Version, 1);
 	reader.Serialize(&packet.MethodNum, 1);
 
-	packet.MethodList.reserve(packet.MethodNum);
+	packet.MethodList.resize(packet.MethodNum);
 	reader.Serialize(packet.MethodList.data(), packet.MethodNum);
 
 	if (packet.Version != ESocksVersion::Socks5) {
@@ -196,21 +196,21 @@ bool ClientSocket::ProcessLicenseCheck()
 		return false;
 	}
 
-	payload.DestPort.reserve(2);
+	payload.DestPort.resize(2);
 
 	reader.Serialize(&payload.AddressType, 1);
 	switch (payload.AddressType)
 	{
 	case EAddressType::IPv4:
 	{
-		payload.DestAddr.reserve(4);
+		payload.DestAddr.resize(4);
 		reader.Serialize(&payload.DestAddr, 4);
 		reader.Serialize(&payload.DestPort, 2);
 		break;
 	}
 	case EAddressType::IPv6:
 	{
-		payload.DestAddr.reserve(16);
+		payload.DestAddr.resize(16);
 		reader.Serialize(payload.DestAddr.data(), 16);
 		reader.Serialize(payload.DestPort.data(), 2);
 		break;
@@ -219,7 +219,7 @@ bool ClientSocket::ProcessLicenseCheck()
 	{
 		int nameLen(0);
 		reader.Serialize(&nameLen, 1);
-		payload.DestAddr.reserve(nameLen);
+		payload.DestAddr.resize(nameLen);
 
 		reader.Serialize(payload.DestAddr.data(), nameLen);
 		reader.Serialize(payload.DestPort.data(), 2);
