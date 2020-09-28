@@ -296,7 +296,7 @@ bool ClientSocket::SendHandshakeResponse(EConnectionProtocol Response)
 	responseData.push_back(static_cast<char>(response.Version));
 	responseData.push_back(static_cast<char>(response.Method));
 
-	if (send(SockHandle, responseData.data(), responseData.size(), 0) == SOCKET_ERROR) {
+	if (send(SockHandle, responseData.data(), static_cast<int>(responseData.size()), 0) == SOCKET_ERROR) {
 		LOG(Warning, "[Client: %s]Send handshake response failed.", Guid.c_str());
 		return false;
 	}
@@ -329,7 +329,7 @@ bool ClientSocket::SendLicenseResponse(const TravelPayload& Payload, ETravelResp
 	replyData.insert(replyData.end(), reply.BindAddress.begin(), reply.BindAddress.end());
 	replyData.insert(replyData.end(), reply.BindPort.begin(), reply.BindPort.end());
 
-	if (send(SockHandle, replyData.data(), replyData.size(), 0) == SOCKET_ERROR) {
+	if (send(SockHandle, replyData.data(), static_cast<int>(replyData.size()), 0) == SOCKET_ERROR) {
 		LOG(Warning, "[Client: %s]Send response of license check failed.", Guid.c_str());
 		return false;
 	}
