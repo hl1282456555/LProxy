@@ -77,7 +77,7 @@ bool ProxyServer::Listen()
 	SOCKADDR_IN serverAddr;
 	std::memset(&serverAddr, 0, sizeof(serverAddr));
 	serverAddr.sin_family = AF_INET;
-	serverAddr.sin_port = SockPort;
+	serverAddr.sin_port = htons(SockPort);
 	InetPtonA(AF_INET, SockIP.c_str(), &serverAddr.sin_addr.S_un);
 
 	if (bind(SockHandle, (SOCKADDR*)&serverAddr, sizeof(SOCKADDR)) == SOCKET_ERROR) {
