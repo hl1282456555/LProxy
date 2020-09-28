@@ -8,15 +8,15 @@
 #include <vector>
 #include <chrono>
 
-class ClientSocket
+class ProxyContext
 {
 public:
-	ClientSocket(SOCKADDR_IN InAddr, SOCKET	InHandle);
-	virtual ~ClientSocket();
+	ProxyContext(SOCKADDR_IN InAddr, SOCKET	InHandle);
+	virtual ~ProxyContext();
 
 	virtual void Close();
 
-	bool operator==(const ClientSocket& Other) const;
+	bool operator==(const ProxyContext& Other) const;
 
 	virtual inline std::string GetGuid();
 
@@ -37,6 +37,8 @@ public:
 	virtual bool SendLicenseResponse(const TravelPayload& Payload, ETravelResponse Response);
 
 	virtual void ProcessForwardData();
+
+	virtual bool CanOperate(SOCKET Socket, EOperationType Operation);
 
 protected:
 	SOCKADDR_IN Addr;

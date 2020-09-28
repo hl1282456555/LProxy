@@ -1,4 +1,4 @@
-#include "ClientSocket.h"
+#include "ProxyContext.h"
 #include "EasyLog.h"
 #include "BufferReader.h"
 #include "ProxyServer.h"
@@ -7,7 +7,7 @@
 #include <WS2tcpip.h>
 #include <vector>
 
-ClientSocket::ClientSocket(SOCKADDR_IN InAddr, SOCKET InHandle)
+ProxyContext::ProxyContext(SOCKADDR_IN InAddr, SOCKET InHandle)
 	: Addr(InAddr)
 	, SockHandle(InHandle)
 	, TransportAddr()
@@ -18,7 +18,7 @@ ClientSocket::ClientSocket(SOCKADDR_IN InAddr, SOCKET InHandle)
 	StartTime = std::chrono::system_clock::now();
 }
 
-ClientSocket::~ClientSocket()
+ProxyContext::~ProxyContext()
 {
 	if (SockHandle != INVALID_SOCKET) {
 		closesocket(SockHandle);
@@ -32,47 +32,52 @@ ClientSocket::~ClientSocket()
 
 }
 
-void ClientSocket::Close()
+void ProxyContext::Close()
 {
 	State = EConnectionState::RequestClose;
 }
 
-bool ClientSocket::operator==(const ClientSocket& Other) const
+bool ProxyContext::operator==(const ProxyContext& Other) const
 {
 	return Guid == Other.Guid;
 }
 
-std::string ClientSocket::GetGuid()
+std::string ProxyContext::GetGuid()
 {
 	return Guid;
 }
 
-EConnectionState ClientSocket::GetState()
+EConnectionState ProxyContext::GetState()
 {
 	return State;
 }
 
-std::chrono::system_clock::time_point ClientSocket::GetStartTime()
+std::chrono::system_clock::time_point ProxyContext::GetStartTime()
 {
 	return StartTime;
 }
 
-void ClientSocket::SetStartTime(const std::chrono::system_clock::time_point& InTime)
+void ProxyContext::SetStartTime(const std::chrono::system_clock::time_point& InTime)
 {
 	StartTime = InTime;
 }
 
-bool ClientSocket::ProcessHandshake()
+bool ProxyContext::ProcessHandshake()
 {
-	LOG(Log, "[Client: %s]Processing handshake.", Guid.c_str());
+	LOG(Log, "[Connection: %s]Processing handshake.", Guid.c_str());
 	StartTime = std::chrono::system_clock::now();
+
+	if (!CanOperate(SockHandle, EOperationType::Read)) {
+		LOG(Log, "[Connection: %s]Can't read data from this connection.", Guid.c_str());
+		return false;
+	}
 
 	static const int handshakeBufferSize = 1 + 1 + 255;
 	char handshakeBuffer[handshakeBufferSize];
 
 	int result = recv(SockHandle, handshakeBuffer, handshakeBufferSize, 0);
 	if (result == SOCKET_ERROR || result < 3) {
-		LOG(Warning, "[Client: %s]Recv data from client failed, code: %d", Guid.c_str(), WSAGetLastError());
+		LOG(Warning, "[Connection: %s]Recv data from client failed, code: %d", Guid.c_str(), WSAGetLastError());
 		SendHandshakeResponse(EConnectionProtocol::Error);
 		return false;
 	}
@@ -87,13 +92,13 @@ bool ClientSocket::ProcessHandshake()
 	reader.Serialize(packet.MethodList.data(), packet.MethodNum);
 
 	if (packet.Version != ESocksVersion::Socks5) {
-		LOG(Warning, "[Client: %s]Wrong protocol version.", Guid.c_str());
+		LOG(Warning, "[Connection: %s]Wrong protocol version.", Guid.c_str());
 		SendHandshakeResponse(EConnectionProtocol::Error);
 		return false;
 	}
 
 	if (packet.MethodNum < 1) {
-		LOG(Warning, "[Client: %s]Wrong method length.", Guid.c_str());
+		LOG(Warning, "[Connection: %s]Wrong method length.", Guid.c_str());
 		SendHandshakeResponse(EConnectionProtocol::Error);
 		return false;
 	}
@@ -108,7 +113,7 @@ bool ClientSocket::ProcessHandshake()
 	}
 
 	if (!bFoundProtocol) {
-		LOG(Warning, "[Client: %s]Only support non-auth protocol now.", Guid.c_str());
+		LOG(Warning, "[Connection: %s]Only support non-auth protocol now.", Guid.c_str());
 		SendHandshakeResponse(EConnectionProtocol::Error);
 		return false;
 	}
@@ -116,9 +121,9 @@ bool ClientSocket::ProcessHandshake()
 	return SendHandshakeResponse(EConnectionProtocol::Non_auth);
 }
 
-bool ClientSocket::ProcessLicenseCheck()
+bool ProxyContext::ProcessLicenseCheck()
 {
-	LOG(Log, "[Client: %s]Processing transport.", Guid.c_str());
+	LOG(Log, "[Connection: %s]Processing transport.", Guid.c_str());
 	StartTime = std::chrono::system_clock::now();
 
 	static const int transportBufferSize = 4096;
@@ -126,7 +131,7 @@ bool ClientSocket::ProcessLicenseCheck()
 
 	int result = recv(SockHandle, requestBuffer, transportBufferSize, 0);
 	if (result == SOCKET_ERROR) {
-		LOG(Warning, "[Client: %s]Can't recv data from client, code: %d", Guid.c_str(), WSAGetLastError());
+		LOG(Warning, "[Connection: %s]Can't recv data from connection, code: %d", Guid.c_str(), WSAGetLastError());
 		return false;
 	}
 
@@ -136,7 +141,7 @@ bool ClientSocket::ProcessLicenseCheck()
 	reader.Serialize(&payload.Version, 1);
 
 	if (payload.Version != ESocksVersion::Socks5) {
-		LOG(Warning, "[Client: %s]Wrong protocol version.", Guid.c_str());
+		LOG(Warning, "[Connection: %s]Wrong protocol version.", Guid.c_str());
 		SendLicenseResponse(payload, ETravelResponse::RulesetNotAllowed);
 		return false;
 	}
@@ -145,7 +150,7 @@ bool ClientSocket::ProcessLicenseCheck()
 	reader.Serialize(&payload.Reserved, 1);
 
 	if (payload.Reserved != 0x00) {
-		LOG(Warning, "[Client: %s]Wrong reserved field value.");
+		LOG(Warning, "[Connection: %s]Wrong reserved field value.");
 		SendLicenseResponse(payload, ETravelResponse::GeneralFailure);
 		return false;
 	}
@@ -182,7 +187,7 @@ bool ClientSocket::ProcessLicenseCheck()
 		break;
 	}
 	default:
-		LOG(Warning, "[Client: %s]Wrong address type.", Guid.c_str());
+		LOG(Warning, "[Connection: %s]Wrong address type.", Guid.c_str());
 		return false;
 	}
 
@@ -199,7 +204,7 @@ bool ClientSocket::ProcessLicenseCheck()
 	case ECommandType::Bind:
 	case ECommandType::UDP:
 	default:
-		LOG(Warning, "[Client: %s]Not supported command.", Guid.c_str());
+		LOG(Warning, "[Connection: %s]Not supported command.", Guid.c_str());
 		SendLicenseResponse(payload, ETravelResponse::CmdNotSupported);
 		return false;
 	}
@@ -207,17 +212,17 @@ bool ClientSocket::ProcessLicenseCheck()
 	return SendLicenseResponse(payload, ETravelResponse::Succeeded);;
 }
 
-bool ClientSocket::ProcessConnectCmd(const TravelPayload& Payload)
+bool ProxyContext::ProcessConnectCmd(const TravelPayload& Payload)
 {
 	if (TransportSockHandle != INVALID_SOCKET) {
-		LOG(Warning, "[Client: %s]Processing travel.", Guid.c_str());
+		LOG(Warning, "[Connection: %s]Processing travel.", Guid.c_str());
 		SendLicenseResponse(Payload, ETravelResponse::GeneralFailure);
 		return false;
 	}
 
 	TransportSockHandle = socket(AF_INET, SOCK_STREAM, 0);
 	if (TransportSockHandle == INVALID_SOCKET) {
-		LOG(Warning, "[Client: %s]Create a new socket for transport failed, code: %d", Guid.c_str(), WSAGetLastError());
+		LOG(Warning, "[Connection: %s]Create a new socket for transport failed, code: %d", Guid.c_str(), WSAGetLastError());
 		SendLicenseResponse(Payload, ETravelResponse::GeneralFailure);
 		return false;
 	}
@@ -228,7 +233,7 @@ bool ClientSocket::ProcessConnectCmd(const TravelPayload& Payload)
 	InetPtonA(AF_INET, "localhost", &TransportAddr.sin_addr);
 
 	if (bind(TransportSockHandle, (SOCKADDR*)&TransportAddr, sizeof(SOCKADDR)) == SOCKET_ERROR) {
-		LOG(Warning, "[Client: %s]Bind address for transport socket failed, code: %d", Guid.c_str(), WSAGetLastError());
+		LOG(Warning, "[Connection: %s]Bind address for transport socket failed, code: %d", Guid.c_str(), WSAGetLastError());
 		SendLicenseResponse(Payload, ETravelResponse::GeneralFailure);
 		return false;
 	}
@@ -256,7 +261,7 @@ bool ClientSocket::ProcessConnectCmd(const TravelPayload& Payload)
 
 		int error = getaddrinfo(Payload.DestAddr.data(), nullptr, &info, &result);
 		if (error != 0) {
-			LOG(Warning, "[Client: %s]Convert hostname to ip address failed, err: %s.", Guid.c_str(), gai_strerrorA(error));
+			LOG(Warning, "[Connection: %s]Convert hostname to ip address failed, err: %s.", Guid.c_str(), gai_strerrorA(error));
 			SendLicenseResponse(Payload, ETravelResponse::HostUnreachable);
 			return false;
 		}
@@ -277,17 +282,22 @@ bool ClientSocket::ProcessConnectCmd(const TravelPayload& Payload)
 	}
 
 	if (connect(TransportSockHandle, (SOCKADDR*)&destAddr, sizeof(SOCKADDR)) == SOCKET_ERROR) {
-		LOG(Warning, "[Client: %s]Connect to destination server failed, code: %d", Guid.c_str(), WSAGetLastError());
+		LOG(Warning, "[Connection: %s]Connect to destination server failed, code: %d", Guid.c_str(), WSAGetLastError());
 		return false;
 	}
 
-	LOG(Log, "[Client: %s]Connect to destination server succeeded.", Guid.c_str());
+	LOG(Log, "[Connection: %s]Connect to destination server succeeded.", Guid.c_str());
 
 	return SendLicenseResponse(Payload, ETravelResponse::Succeeded);
 }
 
-bool ClientSocket::SendHandshakeResponse(EConnectionProtocol Response)
+bool ProxyContext::SendHandshakeResponse(EConnectionProtocol Response)
 {
+	if (!CanOperate(SockHandle, EOperationType::Write)) {
+		LOG(Warning, "[Connection: %s]Can't write reponse into connection.", Guid.c_str());
+		return false;
+	}
+
 	HandshakeResponse response;
 	response.Version = ESocksVersion::Socks5;
 	response.Method = Response;
@@ -297,16 +307,16 @@ bool ClientSocket::SendHandshakeResponse(EConnectionProtocol Response)
 	responseData.push_back(static_cast<char>(response.Method));
 
 	if (send(SockHandle, responseData.data(), static_cast<int>(responseData.size()), 0) == SOCKET_ERROR) {
-		LOG(Warning, "[Client: %s]Send handshake response failed.", Guid.c_str());
+		LOG(Warning, "[Connection: %s]Send handshake response failed.", Guid.c_str());
 		return false;
 	}
 
-	LOG(Log, "[Client: %s]Handshake response data send succeeded.", Guid.c_str());
+	LOG(Log, "[Connection: %s]Handshake response data send succeeded.", Guid.c_str());
 
 	return true;
 }
 
-bool ClientSocket::SendLicenseResponse(const TravelPayload& Payload, ETravelResponse Response)
+bool ProxyContext::SendLicenseResponse(const TravelPayload& Payload, ETravelResponse Response)
 {
 	if (SockHandle == INVALID_SOCKET) {
 		return false;
@@ -330,14 +340,14 @@ bool ClientSocket::SendLicenseResponse(const TravelPayload& Payload, ETravelResp
 	replyData.insert(replyData.end(), reply.BindPort.begin(), reply.BindPort.end());
 
 	if (send(SockHandle, replyData.data(), static_cast<int>(replyData.size()), 0) == SOCKET_ERROR) {
-		LOG(Warning, "[Client: %s]Send response of license check failed.", Guid.c_str());
+		LOG(Warning, "[Connection: %s]Send response of license check failed.", Guid.c_str());
 		return false;
 	}
 
 	return true;
 }
 
-void ClientSocket::ProcessForwardData()
+void ProxyContext::ProcessForwardData()
 {
 	if (SockHandle == INVALID_SOCKET) {
 		return;
@@ -362,6 +372,34 @@ void ClientSocket::ProcessForwardData()
 
 	if (traffic > 0) {
 		StartTime = std::chrono::system_clock::now();
-		LOG(Log, "[Client: %s]Forwarded data traffic: %dbytes", Guid.c_str(), traffic);
+		LOG(Log, "[Connection: %s]Forwarded data traffic: %dbytes", Guid.c_str(), traffic);
 	}
+}
+
+bool ProxyContext::CanOperate(SOCKET Socket, EOperationType Operation)
+{
+	FD_SET sockSet;
+	TIMEVAL timeout = { 5, 0 };
+
+	FD_ZERO(&sockSet);
+	FD_SET(Socket, &sockSet);
+
+	int result = 0;
+
+	switch (Operation)
+	{
+	case EOperationType::Read:
+		result = select(2, &sockSet, nullptr, nullptr, &timeout);
+		break;
+	case EOperationType::Write:
+		result = select(2, nullptr, &sockSet, nullptr, &timeout);
+		break;
+	case EOperationType::Exception:
+		result = select(2, nullptr, nullptr, &sockSet, &timeout);
+		break;
+	default:
+		return false;
+	}
+
+	return (result > 0 && FD_ISSET(Socket, &sockSet));
 }
