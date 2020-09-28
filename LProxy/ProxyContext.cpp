@@ -294,7 +294,7 @@ bool ProxyContext::ProcessConnectCmd(const TravelPayload& Payload)
 bool ProxyContext::SendHandshakeResponse(EConnectionProtocol Response)
 {
 	if (!CanOperate(SockHandle, EOperationType::Write)) {
-		LOG(Warning, "[Connection: %s]Can't write reponse into connection.", Guid.c_str());
+		LOG(Warning, "[Connection: %s]Can't write handshake reponse into connection.", Guid.c_str());
 		return false;
 	}
 
@@ -319,6 +319,11 @@ bool ProxyContext::SendHandshakeResponse(EConnectionProtocol Response)
 bool ProxyContext::SendLicenseResponse(const TravelPayload& Payload, ETravelResponse Response)
 {
 	if (SockHandle == INVALID_SOCKET) {
+		return false;
+	}
+
+	if (!CanOperate(SockHandle, EOperationType::Write)) {
+		LOG(Warning, "[Connection: %s]Can't write license reponse into connection.", Guid.c_str());
 		return false;
 	}
 
