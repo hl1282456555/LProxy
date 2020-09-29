@@ -15,7 +15,7 @@ ProxyContext::ProxyContext(SOCKADDR_IN InAddr, SOCKET InHandle)
 	, Guid(MiscHelper::NewGuid(8))
 	, State(EConnectionState::None)
 {
-	StartTime = std::chrono::system_clock::now();
+
 }
 
 ProxyContext::~ProxyContext()
@@ -52,20 +52,9 @@ EConnectionState ProxyContext::GetState()
 	return State;
 }
 
-std::chrono::system_clock::time_point ProxyContext::GetStartTime()
-{
-	return StartTime;
-}
-
-void ProxyContext::SetStartTime(const std::chrono::system_clock::time_point& InTime)
-{
-	StartTime = InTime;
-}
-
 bool ProxyContext::ProcessHandshake()
 {
 	LOG(Log, "[Connection: %s]Processing handshake.", Guid.c_str());
-	StartTime = std::chrono::system_clock::now();
 
 	static const int handshakeBufferSize = 1 + 1 + 255;
 	char handshakeBuffer[handshakeBufferSize];
@@ -121,7 +110,6 @@ bool ProxyContext::ProcessHandshake()
 bool ProxyContext::ProcessLicenseCheck()
 {
 	LOG(Log, "[Connection: %s]Processing transport.", Guid.c_str());
-	StartTime = std::chrono::system_clock::now();
 
 	static const int transportBufferSize = 4096;
 	char requestBuffer[transportBufferSize] = { 0 };
@@ -288,7 +276,7 @@ bool ProxyContext::ProcessConnectCmd(const TravelPayload& Payload)
 
 	connect(TransportSockHandle, (SOCKADDR*)&destAddr, sizeof(SOCKADDR));
 	if (!CanOperate(TransportSockHandle, EOperationType::Write)) {
-		LOG(Log, "[Connection: %s]Connect to destination server failure.", Guid.c_str());
+		LOG(Warning, "[Connection: %s]Connect to destination server failure, code: %d.", Guid.c_str(), WSAGetLastError());
 		State = EConnectionState::RequestClose;
 		return SendLicenseResponse(Payload, ETravelResponse::GeneralFailure);
 	}
@@ -340,6 +328,7 @@ bool ProxyContext::SendLicenseResponse(const TravelPayload& Payload, ETravelResp
 	replyData.push_back(static_cast<char>(reply.Reply));
 	replyData.push_back(static_cast<char>(reply.Reserved));
 	replyData.push_back(static_cast<char>(reply.AddressType));
+	replyData.push_back(static_cast<char>(reply.BindAddress.size()));
 	replyData.insert(replyData.end(), reply.BindAddress.begin(), reply.BindAddress.end());
 	replyData.insert(replyData.end(), reply.BindPort.begin(), reply.BindPort.end());
 
@@ -366,46 +355,50 @@ void ProxyContext::ProcessForwardData()
 	FD_SET(SockHandle, &sockSet);
 	FD_SET(TransportSockHandle, &sockSet);
 
-	TIMEVAL timeout{5, 0};
+	TIMEVAL timeout{3, 0};
 
 	int result = select(3, &sockSet, nullptr, nullptr, &timeout);
 	if (result == SOCKET_ERROR) {
+		LOG(Log, "[Connection: %s]Select socket failed, code: %d.", Guid.c_str(), WSAGetLastError());
 		return;
 	}
 
-	for (int index = 0; index < sockSet.fd_count; index++)
+	for (unsigned int index = 0; index < sockSet.fd_count; index++)
 	{
+		traffic = 0;
 		std::memset(transportBuffer, 0, SOCK_BUFFER_SIZE);
 
 		SOCKET tempSock = sockSet.fd_array[index];
 		if (tempSock == SockHandle) {
 			result = recv(SockHandle, transportBuffer, SOCK_BUFFER_SIZE, 0);
-			if (result == SOCKET_ERROR || result == 0) {
-				LOG(Log, "[Connection: %s]Recv from SockHandle failed.", Guid.c_str());
-				continue;
+			if (result > 0) {
+				traffic += result;
+
+				result = send(TransportSockHandle, transportBuffer, result, 0);
+				if (result != SOCKET_ERROR) {
+					LOG(Log, "[Connection: %s]Forwarded data from client to dest: %dbytes", Guid.c_str(), traffic);
+				}
 			}
-			result = send(TransportSockHandle, transportBuffer, result, 0);
-			if (result == SOCKET_ERROR) {
-				LOG(Log, "[Connection: %s]Send to TransportSockHandle failed.", Guid.c_str());
+			else if (result == SOCKET_ERROR){
+				LOG(Warning, "[Connection: %s]Recv data from client failed, code: %d", Guid.c_str(), WSAGetLastError());
+				State = EConnectionState::RequestClose;
 			}
 		}
 		else {
 			result = recv(TransportSockHandle, transportBuffer, SOCK_BUFFER_SIZE, 0);
-			if (result == SOCKET_ERROR || result == 0) {
-				LOG(Log, "[Connection: %s]Recv from TransportSockHandle failed.", Guid.c_str());
-				continue;
-			}
+			if (result > 0) {
+				traffic += result;
 
-			result = send(SockHandle, transportBuffer, result, 0);
-			if (result == SOCKET_ERROR) {
-				LOG(Log, "[Connection: %s]Send to SockHandle failed.", Guid.c_str());
+				result = send(SockHandle, transportBuffer, result, 0);
+				if (result != SOCKET_ERROR) {
+					LOG(Log, "[Connection: %s]Forwarded data from dest to client: %dbytes", Guid.c_str(), traffic);
+				}
+			}
+			else if (result == SOCKET_ERROR) {
+				LOG(Warning, "[Connection: %s]Recv data from dest failed, code: %d", Guid.c_str(), WSAGetLastError());
+				State = EConnectionState::RequestClose;
 			}
 		}
-	}
-
-	if (traffic > 0) {
-		StartTime = std::chrono::system_clock::now();
-		LOG(Log, "[Connection: %s]Forwarded data traffic: %dbytes", Guid.c_str(), traffic);
 	}
 }
 

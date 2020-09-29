@@ -22,10 +22,6 @@ public:
 
 	virtual inline EConnectionState GetState();
 
-	virtual inline std::chrono::system_clock::time_point GetStartTime();
-
-	virtual inline void SetStartTime(const std::chrono::system_clock::time_point& InTime);
-
 	virtual bool ProcessHandshake();
 
 	virtual bool ProcessLicenseCheck();
@@ -49,8 +45,6 @@ protected:
 	SOCKET		TransportSockHandle;
 
 	EConnectionState State;
-
-	std::chrono::system_clock::time_point StartTime;
 };
 
 #endif // !CLIENT_SOCKET_H
