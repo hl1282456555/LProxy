@@ -36,7 +36,7 @@ public:
 
 	virtual void OnSocketReadable(bufferevent* InEvent);
 
-	virtual void OnSocketWritable(bufferevent* InEvent);
+	virtual void OnSocketSent(bufferevent* InEvent);
 
 	virtual bool BeforeDestroyContext(bufferevent* InEvent);
 
@@ -47,8 +47,6 @@ protected:
 	TravelPayload LicensePayload;
 
 	EConnectionState State;
-	EConnectionProtocol HandshakeState;
-	ETravelResponse	LicenseState;
 };
 
 #endif // !CLIENT_SOCKET_H

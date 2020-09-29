@@ -20,6 +20,7 @@ enum class EConnectionState
 	HandShakeBack,
 	WaitLicense,
 	LicenseError,
+	LicenseBack,
 	Connected,
 };
 

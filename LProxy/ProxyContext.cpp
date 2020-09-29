@@ -12,8 +12,6 @@
 
 ProxyContext::ProxyContext()
 	: State(EConnectionState::WaitHandShake)
-	, HandshakeState(EConnectionProtocol::Non_auth)
-	, LicenseState(ETravelResponse::Succeeded)
 	, ClientEvent(nullptr)
 	, TransportEvent(nullptr)
 {
@@ -79,14 +77,14 @@ void ProxyContext::ProcessWaitHandshake()
 	if (packet.Version != ESocksVersion::Socks5) {
 		LOG(Warning, "[Connection: %d]Wrong protocol version.", bufferevent_getfd(ClientEvent));
 		State = EConnectionState::HandshakeError;
-		HandshakeState = EConnectionProtocol::Error;
+		SendHandshakeResponse(EConnectionProtocol::Error);
 		return;
 	}
 
 	if (packet.MethodNum < 1) {
 		LOG(Warning, "[Connection: %d]Wrong method length.", bufferevent_getfd(ClientEvent));
 		State = EConnectionState::HandshakeError;
-		HandshakeState = EConnectionProtocol::Error;
+		SendHandshakeResponse(EConnectionProtocol::Error);
 		return;
 	}
 
@@ -102,12 +100,12 @@ void ProxyContext::ProcessWaitHandshake()
 	if (!bFoundProtocol) {
 		LOG(Warning, "[Connection: %d]Only support non-auth protocol now.", bufferevent_getfd(ClientEvent));
 		State = EConnectionState::HandshakeError;
-		HandshakeState = EConnectionProtocol::Error;
+		SendHandshakeResponse(EConnectionProtocol::Error);
 		return;
 	}
 
-	State = EConnectionState::HandShakeBack;
-	HandshakeState = EConnectionProtocol::Non_auth;
+	State = EConnectionState::WaitLicense;
+	SendHandshakeResponse(EConnectionProtocol::Non_auth);
 }
 
 void ProxyContext::ProcessWaitLicense()
@@ -128,7 +126,7 @@ void ProxyContext::ProcessWaitLicense()
 	if (LicensePayload.Version != ESocksVersion::Socks5) {
 		LOG(Warning, "[Connection: %d]Wrong protocol version.", bufferevent_getfd(ClientEvent));
 		State = EConnectionState::LicenseError;
-		LicenseState = ETravelResponse::RulesetNotAllowed;
+		SendLicenseResponse(ETravelResponse::GeneralFailure);
 		return;
 	}
 
@@ -138,7 +136,7 @@ void ProxyContext::ProcessWaitLicense()
 	if (LicensePayload.Reserved != 0x00) {
 		LOG(Warning, "[Connection: %d]Wrong reserved field value.", bufferevent_getfd(ClientEvent));
 		State = EConnectionState::LicenseError;
-		LicenseState = ETravelResponse::GeneralFailure;
+		SendLicenseResponse(ETravelResponse::GeneralFailure);
 		return;
 	}
 
@@ -193,25 +191,26 @@ void ProxyContext::ProcessWaitLicense()
 	default:
 		LOG(Warning, "[Connection: %d]Not supported command.", bufferevent_getfd(ClientEvent));
 		State = EConnectionState::LicenseError;
-		LicenseState = ETravelResponse::CmdNotSupported;
+		SendLicenseResponse(ETravelResponse::CmdNotSupported);
 		return;
 	}
 
 	State = EConnectionState::Connected;
-	LicenseState = ETravelResponse::Succeeded;
+	SendLicenseResponse(ETravelResponse::Succeeded);
 }
 
 bool ProxyContext::ProcessConnectCmd()
 {
 	if (TransportEvent != nullptr) {
 		LOG(Warning, "[Connection: %d]Processing travel.", bufferevent_getfd(ClientEvent));
-		LicenseState = ETravelResponse::ConnectionRefused;
-		return false;
+		return SendLicenseResponse(ETravelResponse::ConnectionRefused);
 	}
 
 	std::shared_ptr<ProxyServer> server = ProxyServer::Get();
 	event_base* base = server->GetEventHandle();
 	TransportEvent = bufferevent_socket_new(base, -1, BEV_OPT_CLOSE_ON_FREE);
+
+	bufferevent_setcb(TransportEvent, ProxyServer::StaticOnSocketReadable, ProxyServer::StaticOnSocketWritable, ProxyServer::StaticOnRecvEvent, this);
 
 	SOCKADDR_IN destAddr;
 	std::memset(&destAddr, 0, sizeof(destAddr));
@@ -237,8 +236,7 @@ bool ProxyContext::ProcessConnectCmd()
 		int error = getaddrinfo(LicensePayload.DestAddr.data(), nullptr, &info, &result);
 		if (error != 0) {
 			LOG(Warning, "[Connection: %d]Convert hostname to ip address failed, err: %s.", bufferevent_getfd(ClientEvent), gai_strerrorA(error));
-			LicenseState = ETravelResponse::HostUnreachable;
-			return false;
+			return SendLicenseResponse(ETravelResponse::HostUnreachable);
 		}
 
 		destAddr.sin_addr = ((SOCKADDR_IN*)(result->ai_addr))->sin_addr;
@@ -258,13 +256,11 @@ bool ProxyContext::ProcessConnectCmd()
 
 	if (bufferevent_socket_connect(TransportEvent, (SOCKADDR*)&destAddr, sizeof(destAddr)) != 0) {
 		LOG(Error, "[Connection: %d]Connect to destination server failure, code: %d.", bufferevent_getfd(ClientEvent), EVUTIL_SOCKET_ERROR());
-		LicenseState = ETravelResponse::NetworkUnreachable;
-		return false;
+		return SendLicenseResponse(ETravelResponse::ConnectionRefused);
 	}
 
-	LOG(Log, "[Connection: %d]Connect to destination server succeeded.", bufferevent_getfd(ClientEvent));
-	LicenseState = ETravelResponse::Succeeded;
-	return true;
+	LOG(Log, "[Connection: %d]Connect to destination server %s succeeded.", bufferevent_getfd(ClientEvent), LicensePayload.DestAddr.data());
+	return SendLicenseResponse(ETravelResponse::Succeeded);
 }
 
 bool ProxyContext::SendHandshakeResponse(EConnectionProtocol Response)
@@ -319,17 +315,14 @@ void ProxyContext::ProcessForwardData()
 	size_t clientBufferSize = evbuffer_get_length(clientBuffer);
 	if (clientBufferSize > 0) {
 		bufferevent_write_buffer(TransportEvent, clientBuffer);
+		LOG(Log, "[Connection: %d]Sent %dbytes from client to server.", bufferevent_getfd(ClientEvent), clientBufferSize);
 	}
 
 	evbuffer* serverBuffer = bufferevent_get_input(TransportEvent);
 	size_t serverBufferSize = evbuffer_get_length(serverBuffer);
 	if (serverBufferSize > 0) {
 		bufferevent_write_buffer(ClientEvent, serverBuffer);
-	}
-
-	size_t totalTraffic = serverBufferSize + clientBufferSize;
-	if (totalTraffic > 0) {
-		LOG(Log, "[Connection: %d]Forwarded data size is %dbytes.", bufferevent_getfd(ClientEvent), totalTraffic);
+		LOG(Log, "[Connection: %d]Sent %dbytes from server to client.", bufferevent_getfd(TransportEvent), serverBufferSize);
 	}
 }
 
@@ -343,26 +336,6 @@ void ProxyContext::OnSocketReadable(bufferevent* InEvent)
 	case EConnectionState::WaitLicense:
 		ProcessWaitLicense();
 		break;
-	default:
-		break;
-	}
-}
-
-void ProxyContext::OnSocketWritable(bufferevent* InEvent)
-{
-	switch (State)
-	{
-	case EConnectionState::HandshakeError:
-		SendHandshakeResponse(HandshakeState);
-		break;
-	case EConnectionState::HandShakeBack:
-		if (SendHandshakeResponse(HandshakeState)) {
-			State = EConnectionState::WaitLicense;
-		}
-		break;
-	case EConnectionState::LicenseError:
-		SendLicenseResponse(LicenseState);
-		break;
 	case EConnectionState::Connected:
 		ProcessForwardData();
 		break;
@@ -371,15 +344,20 @@ void ProxyContext::OnSocketWritable(bufferevent* InEvent)
 	}
 }
 
+void ProxyContext::OnSocketSent(bufferevent* InEvent)
+{
+
+}
+
 bool ProxyContext::BeforeDestroyContext(bufferevent* InEvent)
 {
 	if (InEvent == ClientEvent) {
 		ClientEvent = nullptr;
-		bufferevent_free(ClientEvent);
+		bufferevent_free(InEvent);
 	}
 	else if (InEvent == TransportEvent) {
 		TransportEvent = nullptr;
-		bufferevent_free(ClientEvent);
+		bufferevent_free(InEvent);
 	}
 	else {
 		LOG(Error, "The connection %d is not handled by this context.", bufferevent_getfd(InEvent));

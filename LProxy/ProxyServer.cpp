@@ -165,7 +165,7 @@ void ProxyServer::OnSocketWritableWrapper(bufferevent* Event, void* Context)
 		return;
 	}
 
-	context->OnSocketWritable(Event);
+	context->OnSocketSent(Event);
 }
 
 void ProxyServer::StaticOnRecvEvent(struct bufferevent* BufferEvent, short Reason, void* Context)
@@ -183,21 +183,17 @@ void ProxyServer::OnRecvEventWrapper(struct bufferevent* BufferEvent, short Reas
 		return;
 	}
 
-	switch (Reason)
-	{
-	case BEV_EVENT_EOF:
+	if (Reason & BEV_EVENT_EOF) {
 		LOG(Log, "Connection %d is closed, will free the handle.", bufferevent_getfd(BufferEvent));
 		if (context->BeforeDestroyContext(BufferEvent)) {
 			auto removeIt = std::remove_if(ContextList.begin(), ContextList.end(), [&](const std::shared_ptr<ProxyContext>& Context) { return !Context->IsValid(); });
 			ContextList.erase(removeIt, ContextList.end());
 		}
-		break;
-
-	case BEV_EVENT_CONNECTED:
+	}
+	else if (Reason & BEV_EVENT_CONNECTED) {
 		LOG(Log, "Connection %d connect succeeded.", bufferevent_getfd(BufferEvent));
-		break;
-
-	case BEV_EVENT_ERROR:
+	}
+	else if (Reason & BEV_EVENT_ERROR) {
 		LOG(Error, "Some errors occurred on the connection %d.", bufferevent_getfd(BufferEvent));
 		LOG(Error, "Error: %d", EVUTIL_SOCKET_ERROR());
 		LOG(Error, "Will drop this connection and free the conntection handle.");
@@ -205,10 +201,6 @@ void ProxyServer::OnRecvEventWrapper(struct bufferevent* BufferEvent, short Reas
 			auto removeIt = std::remove_if(ContextList.begin(), ContextList.end(), [&](const std::shared_ptr<ProxyContext>& Context) { return !Context->IsValid(); });
 			ContextList.erase(removeIt, ContextList.end());
 		}
-		break;
-
-	default:
-		break;
 	}
 }
 
