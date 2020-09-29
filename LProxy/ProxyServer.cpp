@@ -46,20 +46,18 @@ void ProxyServer::Run()
 
 			std::shared_ptr<ProxyContext> client(new ProxyContext(acceptAddr, acceptSock));
 
-			{
-				std::lock_guard<std::mutex> pendingScope(PendingLock);
-				PendingQueue.push(client);
-			}
+			std::lock_guard<std::mutex> pendingScope(PendingLock);
+			PendingQueue.push(client);
 
-			{
-				std::lock_guard<std::mutex> destroyScope(DestroyLock);
-				if (DestroyQueue.empty()) {
-					continue;
-				}
-				DestroyQueue.front().reset();
-				DestroyQueue.pop();
+			std::lock_guard<std::mutex> destroyScope(DestroyLock);
+			if (DestroyQueue.empty()) {
+				continue;
 			}
+			DestroyQueue.front().reset();
+			DestroyQueue.pop();
 		}
+
+		std::this_thread::sleep_for(std::chrono::milliseconds(20));
 	}
 }
 
@@ -75,18 +73,6 @@ void ProxyServer::ProcessRequest()
 
 		std::shared_ptr<ProxyContext> client = PendingQueue.front();
 		PendingQueue.pop();
-		
-		
-
-		std::chrono::system_clock::time_point currentTime = std::chrono::system_clock::now();
-		std::chrono::seconds timeOut(15);
-		std::chrono::duration passedTime = currentTime - client->GetStartTime();
-		if (passedTime >= timeOut) {
-			LOG(Log, "[Server]Connection wait timeout, connection uid: %s.", client->GetGuid().c_str());
-			std::lock_guard<std::mutex> destroyScope(DestroyLock);
-			DestroyQueue.push(client);
-			continue;
-		}
 
 		bool bShouldDestroy = false;
 
@@ -121,7 +107,7 @@ void ProxyServer::ProcessRequest()
 		}
 		case EConnectionState::RequestClose:
 		{
-			LOG(Log, "[Connection %s]Client request close, will drop this connection.", client->GetGuid().c_str());
+			LOG(Log, "[Connection: %s]Client request close, will drop this connection.", client->GetGuid().c_str());
 			bShouldDestroy = true;
 			break;
 		}
