@@ -3,7 +3,7 @@
 
 #include <vector>
 
-#define SOCK_BUFFER_SIZE 4096
+#define SOCK_BUFFER_SIZE 1024
 
 enum class EOperationType
 {
