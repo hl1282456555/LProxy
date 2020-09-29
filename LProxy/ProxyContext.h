@@ -3,48 +3,52 @@
 
 #include "ProxyStructures.h"
 
-#include <WinSock2.h>
-#include <string>
-#include <vector>
-#include <chrono>
+#include "event2/bufferevent.h"
 
 class ProxyContext
 {
 public:
-	ProxyContext(SOCKADDR_IN InAddr, SOCKET	InHandle);
+	ProxyContext();
 	virtual ~ProxyContext();
-
-	virtual void Close();
 
 	bool operator==(const ProxyContext& Other) const;
 
-	virtual inline std::string GetGuid();
+	virtual inline bool IsValid();
 
 	virtual inline EConnectionState GetState();
 
-	virtual bool ProcessHandshake();
+	virtual inline void SetClientEvent(bufferevent* InEvent);
+	virtual inline bufferevent* GetClientEvent();
 
-	virtual bool ProcessLicenseCheck();
+	virtual inline bufferevent* GetTransportEvent();
 
-	virtual bool ProcessConnectCmd(const TravelPayload& Payload);
+	virtual void ProcessWaitHandshake();
+
+	virtual void ProcessWaitLicense();
+
+	virtual bool ProcessConnectCmd();
 
 	virtual bool SendHandshakeResponse(EConnectionProtocol Response);
 
-	virtual bool SendLicenseResponse(const TravelPayload& Payload, ETravelResponse Response);
+	virtual bool SendLicenseResponse(ETravelResponse Response);
 
 	virtual void ProcessForwardData();
 
-	virtual bool CanOperate(SOCKET Socket, EOperationType Operation);
+	virtual void OnSocketReadable(bufferevent* InEvent);
+
+	virtual void OnSocketWritable(bufferevent* InEvent);
+
+	virtual bool BeforeDestroyContext(bufferevent* InEvent);
 
 protected:
-	SOCKADDR_IN Addr;
-	SOCKET		SockHandle;
-	std::string Guid;
+	bufferevent* ClientEvent;
+	bufferevent* TransportEvent;
 
-	SOCKADDR_IN TransportAddr;
-	SOCKET		TransportSockHandle;
+	TravelPayload LicensePayload;
 
 	EConnectionState State;
+	EConnectionProtocol HandshakeState;
+	ETravelResponse	LicenseState;
 };
 
 #endif // !CLIENT_SOCKET_H

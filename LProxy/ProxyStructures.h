@@ -15,10 +15,12 @@ enum class EOperationType
 enum class EConnectionState
 {
 	None = 0,
-	Handshark,
-	CheckLicense,
+	WaitHandShake,
+	HandshakeError,
+	HandShakeBack,
+	WaitLicense,
+	LicenseError,
 	Connected,
-	RequestClose,
 };
 
 enum class EConnectionProtocol

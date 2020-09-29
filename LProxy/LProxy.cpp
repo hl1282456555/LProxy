@@ -10,12 +10,10 @@ int main()
 {
 	std::shared_ptr<ProxyServer> server = ProxyServer::Get();
 
-	if (!server->InitSocket()) {
+	if (!server->InitServer()) {
 		LOG(Error, "[Main]Init the proxy server failed.");
 		return -1;
 	}
-
-	server->Run();
 
 	return 0;
 }
