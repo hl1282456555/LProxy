@@ -128,7 +128,7 @@ void ProxyServer::OnListenerAcceptedWrapper(evconnlistener* InListener, evutil_s
 	bufferevent* bufferEvent = bufferevent_socket_new(base, Socket, BEV_OPT_CLOSE_ON_FREE);
 	context->SetClientEvent(bufferEvent);
 	
-	bufferevent_setcb(bufferEvent, ProxyServer::StaticOnSocketReadable, ProxyServer::StaticOnSocketWritable, ProxyServer::StaticOnRecvEvent, &ContextList.back());
+	bufferevent_setcb(bufferEvent, ProxyServer::StaticOnSocketReadable, ProxyServer::StaticOnSocketWritable, ProxyServer::StaticOnRecvEvent, ContextList.back().get());
 	bufferevent_enable(bufferEvent, EV_READ | EV_WRITE);
 }
 
@@ -140,14 +140,14 @@ void ProxyServer::StaticOnSocketReadable(bufferevent* Event, void* Context)
 
 void ProxyServer::OnSocketReadableWrapper(bufferevent* Event, void* Context)
 {
-	std::shared_ptr<ProxyContext>* context = static_cast<std::shared_ptr<ProxyContext>*>(Context);
+	ProxyContext* context = static_cast<ProxyContext*>(Context);
 	if (context == nullptr) {
 		LOG(Error, "The passed context is invalid, will drop this connection.");
 		bufferevent_free(Event);
 		return;
 	}
 
-	(*context)->OnSocketReadable(Event);
+	context->OnSocketReadable(Event);
 }
 
 void ProxyServer::StaticOnSocketWritable(bufferevent* Event, void* Context)
@@ -158,14 +158,14 @@ void ProxyServer::StaticOnSocketWritable(bufferevent* Event, void* Context)
 
 void ProxyServer::OnSocketWritableWrapper(bufferevent* Event, void* Context)
 {
-	std::shared_ptr<ProxyContext>* context = static_cast<std::shared_ptr<ProxyContext>*>(Context);
+	ProxyContext* context = static_cast<ProxyContext*>(Context);
 	if (context == nullptr) {
 		LOG(Error, "The passed context is invalid, will drop this connection.");
 		bufferevent_free(Event);
 		return;
 	}
 
-	(*context)->OnSocketWritable(Event);
+	context->OnSocketWritable(Event);
 }
 
 void ProxyServer::StaticOnRecvEvent(struct bufferevent* BufferEvent, short Reason, void* Context)
@@ -176,7 +176,7 @@ void ProxyServer::StaticOnRecvEvent(struct bufferevent* BufferEvent, short Reaso
 
 void ProxyServer::OnRecvEventWrapper(struct bufferevent* BufferEvent, short Reason, void* Context)
 {
-	std::shared_ptr<ProxyContext>* context = static_cast<std::shared_ptr<ProxyContext>*>(Context);
+	ProxyContext* context = static_cast<ProxyContext*>(Context);
 	if (context == nullptr) {
 		LOG(Error, "The passed context is invalid, will drop this connection.");
 		bufferevent_free(BufferEvent);
@@ -187,7 +187,7 @@ void ProxyServer::OnRecvEventWrapper(struct bufferevent* BufferEvent, short Reas
 	{
 	case BEV_EVENT_EOF:
 		LOG(Log, "Connection %d is closed, will free the handle.", bufferevent_getfd(BufferEvent));
-		if ((*context)->BeforeDestroyContext(BufferEvent)) {
+		if (context->BeforeDestroyContext(BufferEvent)) {
 			auto removeIt = std::remove_if(ContextList.begin(), ContextList.end(), [&](const std::shared_ptr<ProxyContext>& Context) { return !Context->IsValid(); });
 			ContextList.erase(removeIt, ContextList.end());
 		}
@@ -201,7 +201,7 @@ void ProxyServer::OnRecvEventWrapper(struct bufferevent* BufferEvent, short Reas
 		LOG(Error, "Some errors occurred on the connection %d.", bufferevent_getfd(BufferEvent));
 		LOG(Error, "Error: %d", EVUTIL_SOCKET_ERROR());
 		LOG(Error, "Will drop this connection and free the conntection handle.");
-		if ((*context)->BeforeDestroyContext(BufferEvent)) {
+		if (context->BeforeDestroyContext(BufferEvent)) {
 			auto removeIt = std::remove_if(ContextList.begin(), ContextList.end(), [&](const std::shared_ptr<ProxyContext>& Context) { return !Context->IsValid(); });
 			ContextList.erase(removeIt, ContextList.end());
 		}

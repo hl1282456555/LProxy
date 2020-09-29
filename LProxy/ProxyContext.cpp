@@ -11,7 +11,7 @@
 #include <vector>
 
 ProxyContext::ProxyContext()
-	: State(EConnectionState::None)
+	: State(EConnectionState::WaitHandShake)
 	, HandshakeState(EConnectionProtocol::Non_auth)
 	, LicenseState(ETravelResponse::Succeeded)
 	, ClientEvent(nullptr)
@@ -356,8 +356,9 @@ void ProxyContext::OnSocketWritable(bufferevent* InEvent)
 		SendHandshakeResponse(HandshakeState);
 		break;
 	case EConnectionState::HandShakeBack:
-		SendHandshakeResponse(HandshakeState);
-		State = EConnectionState::WaitLicense;
+		if (SendHandshakeResponse(HandshakeState)) {
+			State = EConnectionState::WaitLicense;
+		}
 		break;
 	case EConnectionState::LicenseError:
 		SendLicenseResponse(LicenseState);
