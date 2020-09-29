@@ -206,12 +206,6 @@ bool ProxyContext::ProcessConnectCmd()
 		return SendLicenseResponse(ETravelResponse::ConnectionRefused);
 	}
 
-	std::shared_ptr<ProxyServer> server = ProxyServer::Get();
-	event_base* base = server->GetEventHandle();
-	TransportEvent = bufferevent_socket_new(base, -1, BEV_OPT_CLOSE_ON_FREE);
-
-	bufferevent_setcb(TransportEvent, ProxyServer::StaticOnSocketReadable, ProxyServer::StaticOnSocketWritable, ProxyServer::StaticOnRecvEvent, this);
-
 	SOCKADDR_IN destAddr;
 	std::memset(&destAddr, 0, sizeof(destAddr));
 	std::memcpy(&destAddr.sin_port, LicensePayload.DestPort.data(), 2);
@@ -253,6 +247,14 @@ bool ProxyContext::ProcessConnectCmd()
 		break;
 	}
 	}
+
+
+	std::shared_ptr<ProxyServer> server = ProxyServer::Get();
+	event_base* base = server->GetEventHandle();
+	TransportEvent = bufferevent_socket_new(base, -1, BEV_OPT_CLOSE_ON_FREE);
+
+	bufferevent_setcb(TransportEvent, ProxyServer::StaticOnSocketReadable, ProxyServer::StaticOnSocketWritable, ProxyServer::StaticOnRecvEvent, this);
+	bufferevent_enable(TransportEvent, EV_READ | EV_WRITE);
 
 	if (bufferevent_socket_connect(TransportEvent, (SOCKADDR*)&destAddr, sizeof(destAddr)) != 0) {
 		LOG(Error, "[Connection: %d]Connect to destination server failure, code: %d.", bufferevent_getfd(ClientEvent), EVUTIL_SOCKET_ERROR());

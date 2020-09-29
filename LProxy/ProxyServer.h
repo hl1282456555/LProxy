@@ -2,6 +2,8 @@
 #define PROXY_SERVER_H
 #include "ProxyContext.h"
 
+#include "openssl/ssl.h"
+#include "openssl/err.h"
 #include "event2/listener.h"
 #include "event2/buffer.h"
 #include "event2/bufferevent.h"
@@ -28,6 +30,8 @@ public:
 
 	virtual inline event_base* GetEventHandle();
 
+	virtual inline SSL_CTX* GetSSLContext();
+
 	virtual bool InitServer();
 
 	static void StaticOnListenerAccepted(evconnlistener* InListener, evutil_socket_t Socket, SOCKADDR* Address, int SockLen, void* Arg);
@@ -46,8 +50,6 @@ public:
 
 	virtual void OnRecvEventWrapper(struct bufferevent* BufferEvent, short Reason, void* Context);
 
-	static void StaticEventLog(int Severity, const char* Message);
-
 protected:
 	static std::once_flag InstanceOnceFlag;
 	static std::shared_ptr<ProxyServer> Instance;
@@ -57,6 +59,8 @@ protected:
 
 	event_base* EventHandle;
 	evconnlistener* Listener;
+
+	SSL_CTX* SSLContext;
 
 	std::vector<std::shared_ptr<ProxyContext>> ContextList;
 };

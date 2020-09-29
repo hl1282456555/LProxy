@@ -12,8 +12,17 @@ ProxyServer::ProxyServer()
 	, ServerPort(1080)
 	, EventHandle(nullptr)
 	, Listener(nullptr)
+	, SSLContext(nullptr)
 {
-	event_set_log_callback(ProxyServer::StaticEventLog);
+	SSL_library_init();
+	OpenSSL_add_all_algorithms();
+	ERR_load_crypto_strings();
+	SSL_load_error_strings();
+	SSLContext = SSL_CTX_new(SSLv23_client_method());
+	if (SSLContext == nullptr) {
+		ERR_print_errors_fp(stdout);
+		exit(-1);
+	}
 }
 
 ProxyServer::~ProxyServer()
@@ -28,6 +37,7 @@ ProxyServer::~ProxyServer()
 		EventHandle = nullptr;
 	}
 
+	SSL_CTX_free(SSLContext);
 	WSACleanup();
 }
 
@@ -65,6 +75,11 @@ int ProxyServer::GetPort()
 event_base* ProxyServer::GetEventHandle()
 {
 	return EventHandle;
+}
+
+SSL_CTX* ProxyServer::GetSSLContext()
+{
+	return SSLContext;
 }
 
 bool ProxyServer::InitServer()
@@ -201,28 +216,5 @@ void ProxyServer::OnRecvEventWrapper(struct bufferevent* BufferEvent, short Reas
 			auto removeIt = std::remove_if(ContextList.begin(), ContextList.end(), [&](const std::shared_ptr<ProxyContext>& Context) { return !Context->IsValid(); });
 			ContextList.erase(removeIt, ContextList.end());
 		}
-	}
-}
-
-void ProxyServer::StaticEventLog(int Severity, const char* Message)
-{
-	switch (Severity)
-	{
-	case EVENT_LOG_DEBUG:
-	case EVENT_LOG_MSG:
-		LOG(Log, "[LibEvent]%s", Message);
-		break;
-
-	case EVENT_LOG_WARN:
-		LOG(Warning, "[LibEvent]%s", Message);
-		break;
-
-	case EVENT_LOG_ERR:
-		LOG(Error, "[LibEvent]%s", Message);
-		break;
-
-	default:
-		LOG(Log, "[LibEvent]%s", Message);
-		break;
 	}
 }
