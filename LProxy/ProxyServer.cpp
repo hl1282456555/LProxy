@@ -111,7 +111,7 @@ bool ProxyServer::InitServer()
 	EventHandle = event_base_new();
 	Listener = evconnlistener_new_bind(EventHandle, ProxyServer::StaticOnListenerAccepted, nullptr, LEV_OPT_CLOSE_ON_FREE | LEV_OPT_REUSEABLE, -1, (SOCKADDR*)&addr, sizeof(addr));
 	if (Listener == nullptr) {
-		LOG(Error, "Create a new listener failed.");
+		LOG(Error, "Create a new listener failed, code: %d.", EVUTIL_SOCKET_ERROR());
 		return false;
 	}
 
@@ -134,7 +134,7 @@ void ProxyServer::OnListenerAcceptedWrapper(evconnlistener* InListener, evutil_s
 		return;
 	}
 
-	LOG(Log, "Accept a new connextion: %d", Socket);
+	LOG(Log, "Accept a new connection: %d", Socket);
 
 	std::shared_ptr<ProxyContext> context = std::make_shared<ProxyContext>();
 	ContextList.push_back(context);

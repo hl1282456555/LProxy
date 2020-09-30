@@ -34,7 +34,7 @@ public:
 
 	virtual bool SendLicenseResponse(ETravelResponse Response);
 
-	virtual void ProcessForwardData();
+	virtual void ProcessForwardData(bufferevent* InEvent);
 
 	virtual void OnSocketReadable(bufferevent* InEvent);
 

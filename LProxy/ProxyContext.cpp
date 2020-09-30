@@ -226,7 +226,7 @@ bool ProxyContext::ProcessConnectCmd()
 	{
 		destAddr.sin_family = AF_INET;
 
-		InetPtonA(AF_INET, LicensePayload.DestAddr.data(), &destAddr.sin_addr);
+		std::memcpy(&destAddr.sin_addr, LicensePayload.DestAddr.data(), 4);
 		break;
 	}
 	case EAddressType::DomainName:
@@ -252,9 +252,8 @@ bool ProxyContext::ProcessConnectCmd()
 	}
 	case EAddressType::IPv6:
 	{
-		destAddr.sin_family = AF_INET6;
-
-		InetPtonA(AF_INET6, LicensePayload.DestAddr.data(), &destAddr.sin_addr);
+		State = EConnectionState::LicenseError;
+		SendLicenseResponse(ETravelResponse::AddrNotSupported);
 		break;
 	}
 	}
@@ -269,10 +268,10 @@ bool ProxyContext::ProcessConnectCmd()
 
 	if (bufferevent_socket_connect(TransportEvent, (SOCKADDR*)&destAddr, sizeof(destAddr)) != 0) {
 		LOG(Error, "[Connection: %d]Connect to destination server failure, code: %d.", bufferevent_getfd(ClientEvent), EVUTIL_SOCKET_ERROR());
-		return SendLicenseResponse(ETravelResponse::ConnectionRefused);
+		return SendLicenseResponse(ETravelResponse::NetworkUnreachable);
 	}
 
-	LOG(Log, "[Connection: %d]Connect to destination server %s succeeded.", bufferevent_getfd(ClientEvent), LicensePayload.DestAddr.data());
+	LOG(Log, "[Connection: %d]Connect to destination server succeeded.", bufferevent_getfd(ClientEvent));
 	return SendLicenseResponse(ETravelResponse::Succeeded);
 }
 
@@ -325,7 +324,7 @@ bool ProxyContext::SendLicenseResponse(ETravelResponse Response)
 	return bufferevent_write(ClientEvent, replyData.data(), replyData.size()) == 0;
 }
 
-void ProxyContext::ProcessForwardData()
+void ProxyContext::ProcessForwardData(bufferevent* InEvent)
 {
 	if (ClientEvent == nullptr || TransportEvent == nullptr) {
 		return;
@@ -335,18 +334,37 @@ void ProxyContext::ProcessForwardData()
 	{
 	case EConnectionState::Connected:
 	{
-		evbuffer* clientBuffer = bufferevent_get_input(ClientEvent);
-		size_t clientBufferSize = evbuffer_get_length(clientBuffer);
-		if (clientBufferSize > 0) {
-			bufferevent_write_buffer(TransportEvent, clientBuffer);
-			LOG(Log, "[Connection: %d]Sent %dbytes from client to server.", bufferevent_getfd(ClientEvent), clientBufferSize);
-		}
+		int sendState = 0;
 
-		evbuffer* serverBuffer = bufferevent_get_input(TransportEvent);
-		size_t serverBufferSize = evbuffer_get_length(serverBuffer);
-		if (serverBufferSize > 0) {
-			bufferevent_write_buffer(ClientEvent, serverBuffer);
-			LOG(Log, "[Connection: %d]Sent %dbytes from server to client.", bufferevent_getfd(TransportEvent), serverBufferSize);
+		if (InEvent == ClientEvent) {
+
+			evbuffer* clientBuffer = bufferevent_get_input(ClientEvent);
+			size_t clientBufferSize = evbuffer_get_length(clientBuffer);
+			if (clientBufferSize > 0) {
+				LOG(Log, "[Connection: %d]Recv %dbytes data from client.", bufferevent_getfd(ClientEvent), clientBufferSize);
+				sendState = bufferevent_write_buffer(TransportEvent, clientBuffer);
+				if (sendState != 0) {
+					LOG(Error, "[Connection: %d]Can't sent %dbytes from client to server.", bufferevent_getfd(ClientEvent), clientBufferSize);
+				}
+				else {
+					LOG(Log, "[Connection: %d]Sent %dbytes from client to server.", bufferevent_getfd(ClientEvent), clientBufferSize);
+				}
+			}
+
+		}
+		else if (InEvent == TransportEvent) {
+			evbuffer* serverBuffer = bufferevent_get_input(TransportEvent);
+			size_t serverBufferSize = evbuffer_get_length(serverBuffer);
+			if (serverBufferSize > 0) {
+				LOG(Log, "[Connection: %d]Recv %dbytes data from server.", bufferevent_getfd(TransportEvent), serverBufferSize);
+				sendState = bufferevent_write_buffer(ClientEvent, serverBuffer);
+				if (sendState != 0) {
+					LOG(Error, "[Connection: %d]Can't sent %dbytes from server to client.", bufferevent_getfd(TransportEvent), serverBufferSize);
+				}
+				else {
+					LOG(Log, "[Connection: %d]Sent %dbytes from server to client.", bufferevent_getfd(TransportEvent), serverBufferSize);
+				}
+			}
 		}
 		break;
 	}
@@ -371,7 +389,7 @@ void ProxyContext::OnSocketReadable(bufferevent* InEvent)
 		break;
 	case EConnectionState::Connected:
 	case EConnectionState::UDPAssociate:
-		ProcessForwardData();
+		ProcessForwardData(InEvent);
 		break;
 	default:
 		break;
