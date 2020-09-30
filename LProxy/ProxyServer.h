@@ -4,14 +4,12 @@
 
 #include "openssl/ssl.h"
 #include "openssl/err.h"
-#include "event2/listener.h"
-#include "event2/buffer.h"
-#include "event2/bufferevent.h"
-#include "event2/bufferevent_ssl.h"
 
 #include <mutex>
 #include <string>
 #include <vector>
+#include <queue>
+#include <thread>
 
 class ProxyServer
 {
@@ -28,27 +26,16 @@ public:
 	virtual inline void SetPort(int InPort);
 	virtual inline int GetPort();
 
-	virtual inline event_base* GetEventHandle();
-
 	virtual inline SSL_CTX* GetSSLContext();
 
-	virtual bool InitServer();
+	virtual bool RunServer();
 
-	static void StaticOnListenerAccepted(evconnlistener* InListener, evutil_socket_t Socket, SOCKADDR* Address, int SockLen, void* Arg);
+	virtual void ProcessWorker();
 
-	virtual void OnListenerAcceptedWrapper(evconnlistener* InListener, evutil_socket_t Socket, SOCKADDR* Address, int SockLen, void* Arg);
+protected:
+	virtual void InitSSLContext();
 
-	static void StaticOnSocketReadable(bufferevent* Event, void* Context);
-
-	virtual void OnSocketReadableWrapper(bufferevent* Event, void* Context);
-
-	static void StaticOnSocketWritable(bufferevent* Event, void* Context);
-
-	virtual void OnSocketWritableWrapper(bufferevent* Event, void* Context);
-
-	static void StaticOnRecvEvent(struct bufferevent* BufferEvent, short Reason, void* Context);
-
-	virtual void OnRecvEventWrapper(struct bufferevent* BufferEvent, short Reason, void* Context);
+	virtual void InitWorkThread();
 
 protected:
 	static std::once_flag InstanceOnceFlag;
@@ -57,12 +44,12 @@ protected:
 	std::string ServerIP;
 	int ServerPort;
 
-	event_base* EventHandle;
-	evconnlistener* Listener;
+	SOCKET Listener;
 
 	SSL_CTX* SSLContext;
 
-	std::vector<std::shared_ptr<ProxyContext>> ContextList;
+	std::vector<std::thread>	WorkerThreads;
+	std::queue<std::shared_ptr<ProxyContext>> ContextList;
 };
 
 #endif // !PROXY_SERVER_H

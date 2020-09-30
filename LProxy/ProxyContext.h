@@ -3,8 +3,6 @@
 
 #include "ProxyStructures.h"
 
-#include "event2/bufferevent.h"
-
 class ProxyContext
 {
 public:
@@ -13,14 +11,7 @@ public:
 
 	bool operator==(const ProxyContext& Other) const;
 
-	virtual inline bool IsValid();
-
 	virtual inline EConnectionState GetState();
-
-	virtual inline void SetClientEvent(bufferevent* InEvent);
-	virtual inline bufferevent* GetClientEvent();
-
-	virtual inline bufferevent* GetTransportEvent();
 
 	virtual void ProcessWaitHandshake();
 
@@ -36,15 +27,9 @@ public:
 
 	virtual void ProcessForwardData(bufferevent* InEvent);
 
-	virtual void OnSocketReadable(bufferevent* InEvent);
-
-	virtual void OnSocketSent(bufferevent* InEvent);
-
-	virtual bool BeforeDestroyContext(bufferevent* InEvent);
-
 protected:
-	bufferevent* ClientEvent;
-	bufferevent* TransportEvent;
+	SOCKET	Client;
+	SOCKET	Destination;
 
 	TravelPayload LicensePayload;
 

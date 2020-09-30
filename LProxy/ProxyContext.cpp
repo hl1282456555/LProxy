@@ -12,8 +12,8 @@
 
 ProxyContext::ProxyContext()
 	: State(EConnectionState::WaitHandShake)
-	, ClientEvent(nullptr)
-	, TransportEvent(nullptr)
+	, Client(INVALID_SOCKET)
+	, Destination(INVALID_SOCKET)
 {
 
 }
@@ -25,33 +25,12 @@ ProxyContext::~ProxyContext()
 
 bool ProxyContext::operator==(const ProxyContext& Other) const
 {
-	return (ClientEvent == Other.ClientEvent && TransportEvent == Other.TransportEvent);
-}
-
-bool ProxyContext::IsValid()
-{
-	return (ClientEvent != nullptr || TransportEvent != nullptr);
+	return (Client == Client && Destination == Destination);
 }
 
 EConnectionState ProxyContext::GetState()
 {
 	return State;
-}
-
-
-void ProxyContext::SetClientEvent(bufferevent* InEvent)
-{
-	ClientEvent = InEvent;
-}
-
-bufferevent* ProxyContext::GetClientEvent()
-{
-	return ClientEvent;
-}
-
-bufferevent* ProxyContext::GetTransportEvent()
-{
-	return TransportEvent;
 }
 
 void ProxyContext::ProcessWaitHandshake()
@@ -375,45 +354,4 @@ void ProxyContext::ProcessForwardData(bufferevent* InEvent)
 	}
 	}
 	
-}
-
-void ProxyContext::OnSocketReadable(bufferevent* InEvent)
-{
-	switch (State)
-	{
-	case EConnectionState::WaitHandShake:
-		ProcessWaitHandshake();
-		break;
-	case EConnectionState::WaitLicense:
-		ProcessWaitLicense();
-		break;
-	case EConnectionState::Connected:
-	case EConnectionState::UDPAssociate:
-		ProcessForwardData(InEvent);
-		break;
-	default:
-		break;
-	}
-}
-
-void ProxyContext::OnSocketSent(bufferevent* InEvent)
-{
-
-}
-
-bool ProxyContext::BeforeDestroyContext(bufferevent* InEvent)
-{
-	if (InEvent == ClientEvent) {
-		ClientEvent = nullptr;
-		bufferevent_free(InEvent);
-	}
-	else if (InEvent == TransportEvent) {
-		TransportEvent = nullptr;
-		bufferevent_free(InEvent);
-	}
-	else {
-		LOG(Error, "The connection %d is not handled by this context.", bufferevent_getfd(InEvent));
-	}
-
-	return !IsValid();
 }
