@@ -199,7 +199,7 @@ void ProxyServer::OnRecvEventWrapper(struct bufferevent* BufferEvent, short Reas
 	}
 
 	if (Reason & BEV_EVENT_EOF) {
-		LOG(Log, "Connection %d is closed, will free the handle.", bufferevent_getfd(BufferEvent));
+		LOG(Warning, "Connection %d is closed, will free the handle.", bufferevent_getfd(BufferEvent));
 		if (context->BeforeDestroyContext(BufferEvent)) {
 			auto removeIt = std::remove_if(ContextList.begin(), ContextList.end(), [&](const std::shared_ptr<ProxyContext>& Context) { return !Context->IsValid(); });
 			ContextList.erase(removeIt, ContextList.end());

@@ -28,6 +28,8 @@ public:
 
 	virtual bool ProcessConnectCmd();
 
+	virtual bool ProcessUDPCmd();
+
 	virtual bool SendHandshakeResponse(EConnectionProtocol Response);
 
 	virtual bool SendLicenseResponse(ETravelResponse Response);

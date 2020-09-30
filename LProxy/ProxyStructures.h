@@ -22,6 +22,7 @@ enum class EConnectionState
 	LicenseError,
 	LicenseBack,
 	Connected,
+	UDPAssociate,
 };
 
 enum class EConnectionProtocol

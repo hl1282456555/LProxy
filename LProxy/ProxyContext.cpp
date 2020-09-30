@@ -184,19 +184,30 @@ void ProxyContext::ProcessWaitLicense()
 			State = EConnectionState::LicenseError;
 			return;
 		}
+
+		State = EConnectionState::Connected;
+		SendLicenseResponse(ETravelResponse::Succeeded);
+		break;
+	}
+	
+	case ECommandType::UDP:
+	{
+		if (!ProcessUDPCmd()) {
+			State = EConnectionState::LicenseError;
+			SendLicenseResponse(ETravelResponse::CmdNotSupported);
+			return;
+		}
+		State = EConnectionState::UDPAssociate;
+		SendLicenseResponse(ETravelResponse::Succeeded);
 		break;
 	}
 	case ECommandType::Bind:
-	case ECommandType::UDP:
 	default:
 		LOG(Warning, "[Connection: %d]Not supported command.", bufferevent_getfd(ClientEvent));
 		State = EConnectionState::LicenseError;
 		SendLicenseResponse(ETravelResponse::CmdNotSupported);
 		return;
 	}
-
-	State = EConnectionState::Connected;
-	SendLicenseResponse(ETravelResponse::Succeeded);
 }
 
 bool ProxyContext::ProcessConnectCmd()
@@ -265,6 +276,11 @@ bool ProxyContext::ProcessConnectCmd()
 	return SendLicenseResponse(ETravelResponse::Succeeded);
 }
 
+bool ProxyContext::ProcessUDPCmd()
+{
+	return false;
+}
+
 bool ProxyContext::SendHandshakeResponse(EConnectionProtocol Response)
 {
 	HandshakeResponse response;
@@ -300,7 +316,9 @@ bool ProxyContext::SendLicenseResponse(ETravelResponse Response)
 	replyData.push_back(static_cast<char>(reply.Reply));
 	replyData.push_back(static_cast<char>(reply.Reserved));
 	replyData.push_back(static_cast<char>(reply.AddressType));
-	replyData.push_back(static_cast<char>(reply.BindAddress.size()));
+	if (LicensePayload.AddressType == EAddressType::DomainName) {
+		replyData.push_back(static_cast<char>(reply.BindAddress.size()));
+	}
 	replyData.insert(replyData.end(), reply.BindAddress.begin(), reply.BindAddress.end());
 	replyData.insert(replyData.end(), reply.BindPort.begin(), reply.BindPort.end());
 
@@ -313,19 +331,32 @@ void ProxyContext::ProcessForwardData()
 		return;
 	}
 
-	evbuffer* clientBuffer = bufferevent_get_input(ClientEvent);
-	size_t clientBufferSize = evbuffer_get_length(clientBuffer);
-	if (clientBufferSize > 0) {
-		bufferevent_write_buffer(TransportEvent, clientBuffer);
-		LOG(Log, "[Connection: %d]Sent %dbytes from client to server.", bufferevent_getfd(ClientEvent), clientBufferSize);
-	}
+	switch (State)
+	{
+	case EConnectionState::Connected:
+	{
+		evbuffer* clientBuffer = bufferevent_get_input(ClientEvent);
+		size_t clientBufferSize = evbuffer_get_length(clientBuffer);
+		if (clientBufferSize > 0) {
+			bufferevent_write_buffer(TransportEvent, clientBuffer);
+			LOG(Log, "[Connection: %d]Sent %dbytes from client to server.", bufferevent_getfd(ClientEvent), clientBufferSize);
+		}
 
-	evbuffer* serverBuffer = bufferevent_get_input(TransportEvent);
-	size_t serverBufferSize = evbuffer_get_length(serverBuffer);
-	if (serverBufferSize > 0) {
-		bufferevent_write_buffer(ClientEvent, serverBuffer);
-		LOG(Log, "[Connection: %d]Sent %dbytes from server to client.", bufferevent_getfd(TransportEvent), serverBufferSize);
+		evbuffer* serverBuffer = bufferevent_get_input(TransportEvent);
+		size_t serverBufferSize = evbuffer_get_length(serverBuffer);
+		if (serverBufferSize > 0) {
+			bufferevent_write_buffer(ClientEvent, serverBuffer);
+			LOG(Log, "[Connection: %d]Sent %dbytes from server to client.", bufferevent_getfd(TransportEvent), serverBufferSize);
+		}
+		break;
 	}
+	case EConnectionState::UDPAssociate:
+	{
+		// TODO: Add UDP associate implementions
+		break;
+	}
+	}
+	
 }
 
 void ProxyContext::OnSocketReadable(bufferevent* InEvent)
@@ -339,6 +370,7 @@ void ProxyContext::OnSocketReadable(bufferevent* InEvent)
 		ProcessWaitLicense();
 		break;
 	case EConnectionState::Connected:
+	case EConnectionState::UDPAssociate:
 		ProcessForwardData();
 		break;
 	default:
