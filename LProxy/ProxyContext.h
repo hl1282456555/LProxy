@@ -3,15 +3,19 @@
 
 #include "ProxyStructures.h"
 
+#include <WinSock2.h>
+#include <WS2tcpip.h>
+#include <vector>
+
 class ProxyContext
 {
 public:
-	ProxyContext();
+	ProxyContext(SOCKET InClient, EConnectionState InState = EConnectionState::WaitHandShake);
 	virtual ~ProxyContext();
 
 	bool operator==(const ProxyContext& Other) const;
 
-	virtual inline EConnectionState GetState();
+	virtual inline EConnectionState GetConnectionState() const;
 
 	virtual void ProcessWaitHandshake();
 
@@ -25,7 +29,14 @@ public:
 
 	virtual bool SendLicenseResponse(ETravelResponse Response);
 
-	virtual void ProcessForwardData(bufferevent* InEvent);
+	virtual void ProcessForwardData();
+
+protected:
+	virtual int RecvTrafficFromSocket(SOCKET InSocket, std::vector<char>& TrafficData);
+
+	virtual int SendTrafficToSocket(SOCKET InSocket, const std::vector<char>& TrafficData);
+
+	virtual bool TransportTraffic(SOCKET Source, SOCKET Target);
 
 protected:
 	SOCKET	Client;

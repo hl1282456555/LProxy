@@ -6,6 +6,8 @@
 
 std::once_flag ProxyServer::InstanceOnceFlag;
 std::shared_ptr<ProxyServer> ProxyServer::Instance;
+std::mutex	ProxyServer::ContextQueueLock;
+bool ProxyServer::bRequestExit = false;
 
 ProxyServer::ProxyServer()
 	: ServerIP("localhost")
@@ -14,10 +16,14 @@ ProxyServer::ProxyServer()
 	, SSLContext(nullptr)
 {
 	InitSSLContext();
+
+	InitWorkThread();
 }
 
 ProxyServer::~ProxyServer()
 {
+	bRequestExit = true;
+
 	if (Listener != INVALID_SOCKET) {
 		closesocket(Listener);
 	}
@@ -108,7 +114,31 @@ bool ProxyServer::RunServer()
 
 	while (true)
 	{
+		SOCKADDR_IN acceptedAddr;
+		std::memset(&acceptedAddr, 0, sizeof(acceptedAddr));
+		int addrLen = sizeof(acceptedAddr);
+	
+		SOCKET acceptedSock = accept(Listener, (SOCKADDR*)&acceptedAddr, &addrLen);
+
+		if (acceptedSock == INVALID_SOCKET) {
+			LOG(Error, "Incoming a new connection, but can't accept, code: %d", WSAGetLastError());
+			continue;
+		}
 		
+		char addrBuffer[16] = { 0 };
+		InetNtopA(AF_INET, (SOCKADDR*)&acceptedAddr.sin_addr, addrBuffer, 16);
+		LOG(Log, "Accept a new connection from %s:%d.", addrBuffer, acceptedAddr.sin_port);
+
+		std::shared_ptr<ProxyContext> context(std::make_shared<ProxyContext>(acceptedSock));
+		std::lock_guard<std::mutex> contextQueueScope(ContextQueueLock);
+		u_long bEnableAsync = 1;
+		int asyncResult = ioctlsocket(acceptedSock, FIONBIO, &bEnableAsync);
+		if (asyncResult != NO_ERROR) {
+			LOG(Error, "Can't set this connection non-blocking method, code: %d.", asyncResult);
+			continue;
+		}
+
+		ContextList.push_back(context);
 	}
 
 	return true;
@@ -116,7 +146,59 @@ bool ProxyServer::RunServer()
 
 void ProxyServer::ProcessWorker()
 {
+	while (!bRequestExit)
+	{
+		bool bIsEmptyQueue = false;
+		std::shared_ptr<ProxyContext> context(nullptr);
+		{
+			std::lock_guard<std::mutex> contextQueueScope(ContextQueueLock);
+	
+			bIsEmptyQueue = ContextList.empty();
+			if (!bIsEmptyQueue) {
+				context = ContextList.front();
+				ContextList.erase(ContextList.begin());
+			}
+		}
 
+		if (bIsEmptyQueue) {
+			std::this_thread::sleep_for(std::chrono::milliseconds(5));
+			continue;
+		}
+
+		bool bErrorOccurred = false;
+
+		EConnectionState state = context->GetConnectionState();
+		switch (state)
+		{
+		case EConnectionState::WaitHandShake:
+		{
+			context->ProcessWaitHandshake();
+			break;
+		}
+		case EConnectionState::WaitLicense:
+		{
+			context->ProcessWaitLicense();
+			break;
+		}
+		case EConnectionState::Connected:
+		{
+			context->ProcessForwardData();
+			break;
+		}
+		default:
+			bErrorOccurred = true;
+			break;
+		}
+
+		if (bErrorOccurred) {
+			continue;
+		}
+
+		{
+			std::lock_guard<std::mutex> contextQueueScope(ContextQueueLock);
+			ContextList.push_back(context);
+		}
+	}
 }
 
 void ProxyServer::InitSSLContext()

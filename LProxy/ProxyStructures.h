@@ -3,7 +3,7 @@
 
 #include <vector>
 
-#define SOCK_BUFFER_SIZE 1024
+#define TRAFFIC_BUFFER_SIZE 1024
 
 enum class EOperationType
 {
@@ -17,12 +17,11 @@ enum class EConnectionState
 	None = 0,
 	WaitHandShake,
 	HandshakeError,
-	HandShakeBack,
 	WaitLicense,
 	LicenseError,
-	LicenseBack,
 	Connected,
 	UDPAssociate,
+	ReuqestClose,
 };
 
 enum class EConnectionProtocol

@@ -8,7 +8,6 @@
 #include <mutex>
 #include <string>
 #include <vector>
-#include <queue>
 #include <thread>
 
 class ProxyServer
@@ -49,7 +48,10 @@ protected:
 	SSL_CTX* SSLContext;
 
 	std::vector<std::thread>	WorkerThreads;
-	std::queue<std::shared_ptr<ProxyContext>> ContextList;
+	std::vector<std::shared_ptr<ProxyContext>> ContextList;
+
+	static std::mutex ContextQueueLock;
+	static bool bRequestExit;
 };
 
 #endif // !PROXY_SERVER_H
