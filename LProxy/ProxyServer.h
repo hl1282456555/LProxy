@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 #include <thread>
+#include <queue>
 
 class ProxyServer
 {
@@ -29,12 +30,10 @@ public:
 
 	virtual bool RunServer();
 
-	virtual void ProcessWorker();
-
 protected:
 	virtual void InitSSLContext();
 
-	virtual void InitWorkThread();
+	virtual void InitWorkerThread();
 
 protected:
 	static std::once_flag InstanceOnceFlag;
@@ -47,11 +46,10 @@ protected:
 
 	SSL_CTX* SSLContext;
 
-	std::vector<std::thread>	WorkerThreads;
-	std::vector<std::shared_ptr<ProxyContext>> ContextList;
-
-	static std::mutex ContextQueueLock;
-	static bool bRequestExit;
+	std::vector<std::thread> WorkerThreads;
+	std::queue<std::shared_ptr<ProxyContext>> ContextList;
+	static std::mutex ContextListLock;
+	static bool bStopService;
 };
 
 #endif // !PROXY_SERVER_H

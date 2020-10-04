@@ -6,8 +6,8 @@
 
 std::once_flag ProxyServer::InstanceOnceFlag;
 std::shared_ptr<ProxyServer> ProxyServer::Instance;
-std::mutex	ProxyServer::ContextQueueLock;
-bool ProxyServer::bRequestExit = false;
+std::mutex ProxyServer::ContextListLock;
+bool ProxyServer::bStopService = false;
 
 ProxyServer::ProxyServer()
 	: ServerIP("localhost")
@@ -17,13 +17,13 @@ ProxyServer::ProxyServer()
 {
 	InitSSLContext();
 
-	InitWorkThread();
+	InitWorkerThread();
 }
 
 ProxyServer::~ProxyServer()
 {
-	bRequestExit = true;
-
+	bStopService = true;
+	
 	if (Listener != INVALID_SOCKET) {
 		closesocket(Listener);
 	}
@@ -130,75 +130,13 @@ bool ProxyServer::RunServer()
 		LOG(Log, "Accept a new connection from %s:%d.", addrBuffer, acceptedAddr.sin_port);
 
 		std::shared_ptr<ProxyContext> context(std::make_shared<ProxyContext>(acceptedSock));
-		std::lock_guard<std::mutex> contextQueueScope(ContextQueueLock);
-		u_long bEnableAsync = 1;
-		int asyncResult = ioctlsocket(acceptedSock, FIONBIO, &bEnableAsync);
-		if (asyncResult != NO_ERROR) {
-			LOG(Error, "Can't set this connection non-blocking method, code: %d.", asyncResult);
-			continue;
-		}
 
-		ContextList.push_back(context);
+		std::lock_guard<std::mutex> contextListScope(ContextListLock);
+		ContextList.push(context);
+
 	}
 
 	return true;
-}
-
-void ProxyServer::ProcessWorker()
-{
-	while (!bRequestExit)
-	{
-		bool bIsEmptyQueue = false;
-		std::shared_ptr<ProxyContext> context(nullptr);
-		{
-			std::lock_guard<std::mutex> contextQueueScope(ContextQueueLock);
-	
-			bIsEmptyQueue = ContextList.empty();
-			if (!bIsEmptyQueue) {
-				context = ContextList.front();
-				ContextList.erase(ContextList.begin());
-			}
-		}
-
-		if (bIsEmptyQueue) {
-			std::this_thread::sleep_for(std::chrono::milliseconds(5));
-			continue;
-		}
-
-		bool bErrorOccurred = false;
-
-		EConnectionState state = context->GetConnectionState();
-		switch (state)
-		{
-		case EConnectionState::WaitHandShake:
-		{
-			context->ProcessWaitHandshake();
-			break;
-		}
-		case EConnectionState::WaitLicense:
-		{
-			context->ProcessWaitLicense();
-			break;
-		}
-		case EConnectionState::Connected:
-		{
-			context->ProcessForwardData();
-			break;
-		}
-		default:
-			bErrorOccurred = true;
-			break;
-		}
-
-		if (bErrorOccurred) {
-			continue;
-		}
-
-		{
-			std::lock_guard<std::mutex> contextQueueScope(ContextQueueLock);
-			ContextList.push_back(context);
-		}
-	}
 }
 
 void ProxyServer::InitSSLContext()
@@ -214,15 +152,66 @@ void ProxyServer::InitSSLContext()
 	}
 }
 
-void ProxyServer::InitWorkThread()
+void ProxyServer::InitWorkerThread()
 {
 	int workerNum = std::thread::hardware_concurrency() * 2;
-	LOG(Log, "%d workers created for this machine.", workerNum);
+	LOG(Log, "Will create %d threads for this machine.", workerNum);
 
 	for (int index = 0; index < workerNum; index++)
 	{
-		WorkerThreads.push_back(std::thread(std::bind(&ProxyServer::ProcessWorker, this)));
+		WorkerThreads.push_back(std::thread(
+		[&]()
+		{
+			while (!bStopService)
+			{
+				bool bEmptyQueue = false;
+				std::shared_ptr<ProxyContext> context;
+				{
+					std::lock_guard<std::mutex> contextListScope(ContextListLock);
+					bEmptyQueue = ContextList.empty();
+					if (!bEmptyQueue) {
+						context = ContextList.front();
+						ContextList.pop();
+					}
+				}
+
+				if (bEmptyQueue) {
+					std::this_thread::sleep_for(std::chrono::milliseconds(20));
+					continue;
+				}
+
+				bool bRequestClose = false;
+
+				EConnectionState state = context->GetConnectionState();
+				switch (state)
+				{
+				case EConnectionState::WaitHandShake:
+					context->ProcessWaitHandshake();
+					break;
+
+				case EConnectionState::WaitLicense:
+					context->ProcessWaitLicense();
+					break;
+
+				case EConnectionState::Connected:
+				case EConnectionState::UDPAssociate:
+					context->ProcessForwardData();
+					break;
+
+				default:
+					bRequestClose = true;
+					break;
+				}
+
+				if (bRequestClose) {
+					continue;
+				}
+
+				std::lock_guard<std::mutex> contextListScope(ContextListLock);
+				ContextList.push(context);
+			}
+		}));
+
 		WorkerThreads.back().detach();
 	}
 }
-

@@ -6,6 +6,7 @@
 #include <WinSock2.h>
 #include <WS2tcpip.h>
 #include <vector>
+#include <string>
 
 class ProxyContext
 {
@@ -32,11 +33,14 @@ public:
 	virtual void ProcessForwardData();
 
 protected:
-	virtual int RecvTrafficFromSocket(SOCKET InSocket, std::vector<char>& TrafficData);
 
-	virtual int SendTrafficToSocket(SOCKET InSocket, const std::vector<char>& TrafficData);
+	virtual bool TransportTraffic();
 
 	virtual bool TransportTraffic(SOCKET Source, SOCKET Target);
+
+	virtual std::string GetCurrentThreadId();
+
+	virtual std::string GetTravelResponseName(ETravelResponse Response);
 
 protected:
 	SOCKET	Client;
