@@ -46,7 +46,7 @@ protected:
 
 	virtual bool ParsePayloadAddress();
 
-	virtual UDPTravelReply BuildUDPPacket(const char* Buffer, int Len);
+	virtual UDPTravelReply ParseUDPPacket(const char* buffer, int Len);
 
 protected:
 	SOCKET	Client;

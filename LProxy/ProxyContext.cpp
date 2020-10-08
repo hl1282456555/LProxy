@@ -213,10 +213,16 @@ bool ProxyContext::ProcessConnectCmd()
 
 bool ProxyContext::ProcessUDPCmd()
 {
+	if (!ParsePayloadAddress()) {
+		return false;
+	}
 
-	LOG(Log, "[Connection: %d]UDP command not support.", GetCurrentThreadId().c_str());
-	SendLicenseResponse(ETravelResponse::CmdNotSupported);
-	return false;
+	TIMEVAL timeout = { 0, SOCK_TIMEOUT_MSEC };
+	setsockopt(Destination, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+
+	LOG(Log, "[Connection: %d]Connect to destination server with udp connection succeeded.", GetCurrentThreadId().c_str());
+
+	return SendLicenseResponse(ETravelResponse::Succeeded);
 }
 
 bool ProxyContext::SendHandshakeResponse(EConnectionProtocol Response)
@@ -466,23 +472,28 @@ bool ProxyContext::ParsePayloadAddress()
 	return true;
 }
 
-UDPTravelReply ProxyContext::BuildUDPPacket(const char* Buffer, int Len)
+UDPTravelReply ProxyContext::ParseUDPPacket(const char* buffer, int Len)
 {
-	UDPTravelReply result;
-	char reserved = 0x00;
-	result.Reserved.push_back(reserved);
-	result.Reserved.push_back(reserved);
-	
-	result.Fragment = 0x00;
+	UDPTravelReply reply;
 
-	result.AddressType = LicensePayload.AddressType;
+	BufferReader reader(buffer, Len);
 
-	result.BindAddress.resize(4);
-	std::memcpy(result.BindAddress.data(), &DestAddr.sin_addr, 4);
-	result.BindPort = LicensePayload.DestPort;
+	reply.Reserved.resize(2);
+	reader.Serialize(reply.Reserved.data(), 2);
 
-	result.Data.resize(Len);
-	std::memcpy(result.Data.data(), Buffer, Len);
+	reader.Serialize(&reply.Fragment, 1);
 
-	return result;
+	reader.Serialize(&reply.AddressType, 1);
+
+	reply.BindAddress.resize(4);
+	reader.Serialize(reply.BindAddress.data(), 4);
+
+	reply.BindPort.resize(2);
+	reader.Serialize(reply.BindPort.data(), 2);
+
+	int dataLen = Len - 2 - 1 - 4 - 2;
+	reply.Data.resize(dataLen);
+	reader.Serialize(reply.Data.data(), dataLen);
+
+	return reply;
 }
