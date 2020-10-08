@@ -48,8 +48,6 @@ protected:
 
 	virtual UDPTravelReply BuildUDPPacket(const char* Buffer, int Len);
 
-	virtual bool SendUDPReply(const UDPTravelReply& Reply);
-
 protected:
 	SOCKET	Client;
 	SOCKET	Destination;

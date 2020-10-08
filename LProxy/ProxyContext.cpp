@@ -213,16 +213,10 @@ bool ProxyContext::ProcessConnectCmd()
 
 bool ProxyContext::ProcessUDPCmd()
 {
-	if (!ParsePayloadAddress()) {
-		return false;
-	}
 
-	TIMEVAL timeout = { 0, SOCK_TIMEOUT_MSEC };
-	setsockopt(Destination, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
-
-	LOG(Log, "[Connection: %d]Connect to destination server with udp connection succeeded.", GetCurrentThreadId().c_str());
-
-	return SendLicenseResponse(ETravelResponse::Succeeded);
+	LOG(Log, "[Connection: %d]UDP command not support.", GetCurrentThreadId().c_str());
+	SendLicenseResponse(ETravelResponse::CmdNotSupported);
+	return false;
 }
 
 bool ProxyContext::SendHandshakeResponse(EConnectionProtocol Response)
@@ -374,63 +368,7 @@ bool ProxyContext::TransportTraffic(SOCKET Source, SOCKET Target)
 
 bool ProxyContext::TransportUDPTraffic()
 {
-	FD_SET readSet;
-	FD_ZERO(&readSet);
-	FD_SET(Client, &readSet);
-
-	TIMEVAL timeout = { 1, 0 };
-
-	int selectResult = select(0, &readSet, nullptr, nullptr, &timeout);
-	if (selectResult < 0 || selectResult > 1) {
-		LOG(Error, "[Connection: %s]Select result out of range %d, code: %d", GetCurrentThreadId().c_str(), selectResult, WSAGetLastError());
-		return false;
-	}
-
-	int recvState(0), sendState(0), sentBytes(0);
-	char buffer[TRAFFIC_BUFFER_SIZE];
-	std::memset(buffer, 0, TRAFFIC_BUFFER_SIZE);
-
-	if (FD_ISSET(Client, &readSet)) {
-		recvState = recv(Client, buffer, TRAFFIC_BUFFER_SIZE, 0);
-		if (recvState < 0) {
-			LOG(Error, "[Connection: %s]Recv buffer error: %d , code: %d", GetCurrentThreadId().c_str(), recvState, WSAGetLastError());
-			return false;
-		}
-		else if (recvState == 0) {
-			return true;
-		}
-		else {
-			while (sentBytes < recvState)
-			{
-				sendState = sendto(Destination, buffer + sentBytes, recvState - sentBytes, 0, (SOCKADDR*)&DestAddr, sizeof(DestAddr));
-				if (sendState == SOCKET_ERROR) {
-					if (WSAGetLastError() == 10035) {
-						continue;
-					}
-
-					LOG(Error, "[Connection: %s]Send traffic error: %d, code: %d", GetCurrentThreadId().c_str(), sendState, WSAGetLastError());
-					return false;
-				}
-
-				sentBytes += sendState;
-			}
-		}
-	}
-
-	std::memset(buffer,	0, TRAFFIC_BUFFER_SIZE);
-	int addrLen = static_cast<int>(sizeof(DestAddr));
-	recvState = recvfrom(Destination, buffer, TRAFFIC_BUFFER_SIZE, 0, (SOCKADDR*)&DestAddr, &addrLen);
-	if (recvState < 0) {
-		LOG(Error, "[Connection: %s]Recv buffer from dest error: %d , code: %d", GetCurrentThreadId().c_str(), recvState, WSAGetLastError());
-		return false;
-	}
-	else if (recvState == 0) {
-		return true;
-	}
-	else {
-		UDPTravelReply reply = BuildUDPPacket(buffer, recvState);
-		return SendUDPReply(reply);
-	}
+	return false;
 }
 
 std::string ProxyContext::GetCurrentThreadId()
@@ -547,34 +485,4 @@ UDPTravelReply ProxyContext::BuildUDPPacket(const char* Buffer, int Len)
 	std::memcpy(result.Data.data(), Buffer, Len);
 
 	return result;
-}
-
-bool ProxyContext::SendUDPReply(const UDPTravelReply& Reply)
-{
-	std::vector<char> replyBuffer;
-	replyBuffer.insert(replyBuffer.end(), Reply.Reserved.begin(), Reply.Reserved.end());
-	replyBuffer.push_back(Reply.Fragment);
-	replyBuffer.push_back(static_cast<char>(Reply.AddressType));
-	replyBuffer.insert(replyBuffer.end(), Reply.BindAddress.begin(), Reply.BindAddress.end());
-	replyBuffer.insert(replyBuffer.end(), Reply.BindPort.begin(), Reply.BindPort.end());
-	replyBuffer.insert(replyBuffer.end(), Reply.Data.begin(), Reply.Data.end());
-
-	int sendState(0), sentBytes(0);
-	int bufferSize = static_cast<int>(replyBuffer.size());
-	while (sentBytes < bufferSize)
-	{
-		sendState = send(Client, replyBuffer.data() + sentBytes, bufferSize - sentBytes, 0);
-		if (sendState == SOCKET_ERROR) {
-			if (WSAGetLastError() == 10035) {
-				continue;
-			}
-
-			LOG(Error, "[Connection: %s]Send traffic error: %d, code: %d", GetCurrentThreadId().c_str(), sendState, WSAGetLastError());
-			return false;
-		}
-
-		sentBytes += sendState;
-	}
-
-	return true;
 }
