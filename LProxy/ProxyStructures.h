@@ -4,6 +4,8 @@
 #include <vector>
 
 #define TRAFFIC_BUFFER_SIZE 1024
+#define SOCK_TIMEOUT_SEC 3
+#define SOCK_TIMEOUT_MSEC 20
 
 enum class EOperationType
 {
@@ -167,6 +169,48 @@ struct TravelReply
 	* Server bound port in network octet order
 	*/
 	std::vector<char> BindPort;
+};
+
+struct UDPTravelReply
+{
+	/**
+	* Reserved field
+	* 0x0000 default value
+	*/
+	std::vector<char> Reserved;
+
+	/**
+	* Current fragment number
+	* 0x00			Indicates that this datagram is standalone.
+	* 0x01 - 0xff	Indicate the fragment posistion whithin a fragment sequence.
+	*/
+	char Fragment;
+
+	/**
+	* Address type of following address
+	* @see EAddressType
+	*/
+	EAddressType AddressType{EAddressType::IPv4};
+
+	/**
+	* Server bound address
+	* [IPv4]		A version-4 IP address, with a length of 4 octets
+	* [DomainName]	Fully-qualified domain name, the first octet of
+					the address field contains the number of octets of name that follow,
+					there is no terminating NUL octet.
+	* [IPv6]		A version-6 IP address, with a length of 16 octets.
+	*/
+	std::vector<char> BindAddress;
+
+	/**
+	* Server bound port in network octet order
+	*/
+	std::vector<char> BindPort;
+
+	/**
+	* UDP datagram
+	*/
+	std::vector<char> Data;
 };
 
 #endif // !PROXY_STRUCTURES_H

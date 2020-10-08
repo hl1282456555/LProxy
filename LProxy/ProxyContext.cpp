@@ -180,11 +180,9 @@ void ProxyContext::ProcessWaitLicense()
 	{
 		if (!ProcessUDPCmd()) {
 			State = EConnectionState::LicenseError;
-			SendLicenseResponse(ETravelResponse::CmdNotSupported);
 			return;
 		}
 		State = EConnectionState::UDPAssociate;
-		SendLicenseResponse(ETravelResponse::Succeeded);
 		break;
 	}
 	case ECommandType::Bind:
@@ -198,61 +196,11 @@ void ProxyContext::ProcessWaitLicense()
 
 bool ProxyContext::ProcessConnectCmd()
 {
-	SOCKADDR_IN destAddr;
-	std::memset(&destAddr, 0, sizeof(destAddr));
-	std::memcpy(&destAddr.sin_port, LicensePayload.DestPort.data(), 2);
-	switch (LicensePayload.AddressType)
-	{
-	case EAddressType::IPv4:
-	{
-		destAddr.sin_family = AF_INET;
-
-		std::memcpy(&destAddr.sin_addr, LicensePayload.DestAddr.data(), 4);
-
-		Destination = socket(AF_INET, SOCK_STREAM, 0);
-
-		break;
-	}
-	case EAddressType::DomainName:
-	{
-		destAddr.sin_family = AF_INET;
-
-		ADDRINFO info, *result;
-		std::memset(&info, 0, sizeof(ADDRINFO));
-		info.ai_socktype = SOCK_STREAM;
-		info.ai_family = AF_INET;
-
-		int error = getaddrinfo(LicensePayload.DestAddr.data(), nullptr, &info, &result);
-		if (error != 0) {
-			LOG(Warning, "[Connection: %s]Convert hostname to ip address failed, err: %s.", GetCurrentThreadId().c_str(), gai_strerrorA(error));
-			State = EConnectionState::LicenseError;
-			SendLicenseResponse(ETravelResponse::HostUnreachable);
-			return false;
-		}
-
-		destAddr.sin_addr = ((SOCKADDR_IN*)(result->ai_addr))->sin_addr;
-
-		freeaddrinfo(result);
-
-		Destination = socket(AF_INET, SOCK_STREAM, 0);
-
-		break;
-	}
-	case EAddressType::IPv6:
-	{
-		State = EConnectionState::LicenseError;
-		SendLicenseResponse(ETravelResponse::AddrNotSupported);
-		return false;
-	}
-	}
-
-	if (Destination == INVALID_SOCKET) {
-		LOG(Error, "[Connection: %s]Create a new socket to connect destination server failed, code: %d.", GetCurrentThreadId().c_str(), WSAGetLastError());
-		SendLicenseResponse(ETravelResponse::GeneralFailure);
+	if (!ParsePayloadAddress()) {
 		return false;
 	}
 
-	int connectResult = connect(Destination, (SOCKADDR*)&destAddr, sizeof(destAddr));
+	int connectResult = connect(Destination, (SOCKADDR*)&DestAddr, sizeof(DestAddr));
 	if (connectResult == SOCKET_ERROR) {
 		LOG(Error, "[Connection: %s]Connect to destination server failure, code: %d.", GetCurrentThreadId().c_str(), WSAGetLastError());
 		SendLicenseResponse(ETravelResponse::NetworkUnreachable);
@@ -265,7 +213,16 @@ bool ProxyContext::ProcessConnectCmd()
 
 bool ProxyContext::ProcessUDPCmd()
 {
-	return false;
+	if (!ParsePayloadAddress()) {
+		return false;
+	}
+
+	TIMEVAL timeout = { 0, SOCK_TIMEOUT_MSEC };
+	setsockopt(Destination, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+
+	LOG(Log, "[Connection: %d]Connect to destination server with udp connection succeeded.", GetCurrentThreadId().c_str());
+
+	return SendLicenseResponse(ETravelResponse::Succeeded);
 }
 
 bool ProxyContext::SendHandshakeResponse(EConnectionProtocol Response)
@@ -339,7 +296,10 @@ void ProxyContext::ProcessForwardData()
 	}
 	case EConnectionState::UDPAssociate:
 	{
-		// TODO: Add UDP associate implementions
+		if (!TransportUDPTraffic()) {
+			State = EConnectionState::ReuqestClose;
+			return;
+		}
 		break;
 	}
 	}
@@ -412,6 +372,67 @@ bool ProxyContext::TransportTraffic(SOCKET Source, SOCKET Target)
 	return true;
 }
 
+bool ProxyContext::TransportUDPTraffic()
+{
+	FD_SET readSet;
+	FD_ZERO(&readSet);
+	FD_SET(Client, &readSet);
+
+	TIMEVAL timeout = { 1, 0 };
+
+	int selectResult = select(0, &readSet, nullptr, nullptr, &timeout);
+	if (selectResult < 0 || selectResult > 1) {
+		LOG(Error, "[Connection: %s]Select result out of range %d, code: %d", GetCurrentThreadId().c_str(), selectResult, WSAGetLastError());
+		return false;
+	}
+
+	int recvState(0), sendState(0), sentBytes(0);
+	char buffer[TRAFFIC_BUFFER_SIZE];
+	std::memset(buffer, 0, TRAFFIC_BUFFER_SIZE);
+
+	if (FD_ISSET(Client, &readSet)) {
+		recvState = recv(Client, buffer, TRAFFIC_BUFFER_SIZE, 0);
+		if (recvState < 0) {
+			LOG(Error, "[Connection: %s]Recv buffer error: %d , code: %d", GetCurrentThreadId().c_str(), recvState, WSAGetLastError());
+			return false;
+		}
+		else if (recvState == 0) {
+			return true;
+		}
+		else {
+			while (sentBytes < recvState)
+			{
+				sendState = sendto(Destination, buffer + sentBytes, recvState - sentBytes, 0, (SOCKADDR*)&DestAddr, sizeof(DestAddr));
+				if (sendState == SOCKET_ERROR) {
+					if (WSAGetLastError() == 10035) {
+						continue;
+					}
+
+					LOG(Error, "[Connection: %s]Send traffic error: %d, code: %d", GetCurrentThreadId().c_str(), sendState, WSAGetLastError());
+					return false;
+				}
+
+				sentBytes += sendState;
+			}
+		}
+	}
+
+	std::memset(buffer,	0, TRAFFIC_BUFFER_SIZE);
+	int addrLen = static_cast<int>(sizeof(DestAddr));
+	recvState = recvfrom(Destination, buffer, TRAFFIC_BUFFER_SIZE, 0, (SOCKADDR*)&DestAddr, &addrLen);
+	if (recvState < 0) {
+		LOG(Error, "[Connection: %s]Recv buffer from dest error: %d , code: %d", GetCurrentThreadId().c_str(), recvState, WSAGetLastError());
+		return false;
+	}
+	else if (recvState == 0) {
+		return true;
+	}
+	else {
+		UDPTravelReply reply = BuildUDPPacket(buffer, recvState);
+		return SendUDPReply(reply);
+	}
+}
+
 std::string ProxyContext::GetCurrentThreadId()
 {
 	std::stringstream stream;
@@ -447,4 +468,113 @@ std::string ProxyContext::GetTravelResponseName(ETravelResponse Response)
 	default:
 		return "(null)";
 	}
+}
+
+bool ProxyContext::ParsePayloadAddress()
+{
+	std::memset(&DestAddr, 0, sizeof(DestAddr));
+	std::memcpy(&DestAddr.sin_port, LicensePayload.DestPort.data(), 2);
+	switch (LicensePayload.AddressType)
+	{
+	case EAddressType::IPv4:
+	{
+		DestAddr.sin_family = AF_INET;
+
+		std::memcpy(&DestAddr.sin_addr, LicensePayload.DestAddr.data(), 4);
+
+		Destination = socket(AF_INET, SOCK_STREAM, 0);
+
+		break;
+	}
+	case EAddressType::DomainName:
+	{
+		DestAddr.sin_family = AF_INET;
+
+		ADDRINFO info, * result;
+		std::memset(&info, 0, sizeof(ADDRINFO));
+		info.ai_socktype = SOCK_STREAM;
+		info.ai_family = AF_INET;
+
+		int error = getaddrinfo(LicensePayload.DestAddr.data(), nullptr, &info, &result);
+		if (error != 0) {
+			LOG(Warning, "[Connection: %s]Convert hostname to ip address failed, err: %s.", GetCurrentThreadId().c_str(), gai_strerrorA(error));
+			State = EConnectionState::LicenseError;
+			SendLicenseResponse(ETravelResponse::HostUnreachable);
+			return false;
+		}
+
+		DestAddr.sin_addr = ((SOCKADDR_IN*)(result->ai_addr))->sin_addr;
+
+		freeaddrinfo(result);
+
+		Destination = socket(AF_INET, SOCK_STREAM, 0);
+
+		break;
+	}
+	case EAddressType::IPv6:
+	{
+		State = EConnectionState::LicenseError;
+		SendLicenseResponse(ETravelResponse::AddrNotSupported);
+		return false;
+	}
+	}
+
+	if (Destination == INVALID_SOCKET) {
+		LOG(Error, "[Connection: %s]Create a new socket to connect destination server failed, code: %d.", GetCurrentThreadId().c_str(), WSAGetLastError());
+		SendLicenseResponse(ETravelResponse::GeneralFailure);
+		return false;
+	}
+
+	return true;
+}
+
+UDPTravelReply ProxyContext::BuildUDPPacket(const char* Buffer, int Len)
+{
+	UDPTravelReply result;
+	char reserved = 0x00;
+	result.Reserved.push_back(reserved);
+	result.Reserved.push_back(reserved);
+	
+	result.Fragment = 0x00;
+
+	result.AddressType = LicensePayload.AddressType;
+
+	result.BindAddress.resize(4);
+	std::memcpy(result.BindAddress.data(), &DestAddr.sin_addr, 4);
+	result.BindPort = LicensePayload.DestPort;
+
+	result.Data.resize(Len);
+	std::memcpy(result.Data.data(), Buffer, Len);
+
+	return result;
+}
+
+bool ProxyContext::SendUDPReply(const UDPTravelReply& Reply)
+{
+	std::vector<char> replyBuffer;
+	replyBuffer.insert(replyBuffer.end(), Reply.Reserved.begin(), Reply.Reserved.end());
+	replyBuffer.push_back(Reply.Fragment);
+	replyBuffer.push_back(static_cast<char>(Reply.AddressType));
+	replyBuffer.insert(replyBuffer.end(), Reply.BindAddress.begin(), Reply.BindAddress.end());
+	replyBuffer.insert(replyBuffer.end(), Reply.BindPort.begin(), Reply.BindPort.end());
+	replyBuffer.insert(replyBuffer.end(), Reply.Data.begin(), Reply.Data.end());
+
+	int sendState(0), sentBytes(0);
+	int bufferSize = static_cast<int>(replyBuffer.size());
+	while (sentBytes < bufferSize)
+	{
+		sendState = send(Client, replyBuffer.data() + sentBytes, bufferSize - sentBytes, 0);
+		if (sendState == SOCKET_ERROR) {
+			if (WSAGetLastError() == 10035) {
+				continue;
+			}
+
+			LOG(Error, "[Connection: %s]Send traffic error: %d, code: %d", GetCurrentThreadId().c_str(), sendState, WSAGetLastError());
+			return false;
+		}
+
+		sentBytes += sendState;
+	}
+
+	return true;
 }

@@ -38,13 +38,23 @@ protected:
 
 	virtual bool TransportTraffic(SOCKET Source, SOCKET Target);
 
+	virtual bool TransportUDPTraffic();
+
 	virtual std::string GetCurrentThreadId();
 
 	virtual std::string GetTravelResponseName(ETravelResponse Response);
 
+	virtual bool ParsePayloadAddress();
+
+	virtual UDPTravelReply BuildUDPPacket(const char* Buffer, int Len);
+
+	virtual bool SendUDPReply(const UDPTravelReply& Reply);
+
 protected:
 	SOCKET	Client;
 	SOCKET	Destination;
+
+	SOCKADDR_IN DestAddr;
 
 	TravelPayload LicensePayload;
 
