@@ -7,8 +7,8 @@
 #include <fstream>
 #include <iostream>
 #include <ctime>
-#include <winsock.h>
 #include <random>
+#include <WS2tcpip.h>
 
 std::string MiscHelper::GetDateNow()
 {
@@ -86,29 +86,29 @@ Json MiscHelper::LoadConfig()
 	return config;
 }
 
-std::string MiscHelper::GetLocalHost()
+bool MiscHelper::GetLocalHostS(unsigned long& IP)
 {
-	WSADATA wsaData;
-	if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
-		LOG(Error, "Can't init wsa.");
-		return "(null)";
-	}
-
 	char hostName[256];
 	if (gethostname(hostName, sizeof(hostName)) != 0) {
 		LOG(Error, "Can't get hotname.");
 		return "(null)";
 	}
 
-	hostent* host = gethostbyname(hostName);
-	if (host == nullptr) {
-		LOG(Error, "Can't get host by name.");
-		return "(null)";
+	ADDRINFO info, * result;
+	std::memset(&info, 0, sizeof(ADDRINFO));
+	info.ai_family = AF_INET;
+
+	int error = getaddrinfo(hostName, nullptr, &info, &result);
+	if (error != 0) {
+		LOG(Warning, "Convert hostname to ip address failed, err: %s.", gai_strerrorA(error));
+		return false;
 	}
 
-	char ipBuffer[32];
-	std::strcpy(ipBuffer, inet_ntoa(*(in_addr*)*host->h_addr_list));
-	return ipBuffer;
+	IP = ((SOCKADDR_IN*)(result->ai_addr))->sin_addr.s_addr;
+
+	freeaddrinfo(result);
+	
+	return true;
 }
 
 std::string MiscHelper::NewGuid(int Length)
@@ -129,4 +129,34 @@ std::string MiscHelper::NewGuid(int Length)
 	}
 
 	return stream.str();
+}
+
+bool MiscHelper::GetAvaliablePort(unsigned short Port, bool bTCP, int IPType)
+{
+	SOCKET sock = socket(IPType, bTCP ? SOCK_STREAM : SOCK_DGRAM, 0);
+
+	SOCKADDR_IN addr;
+	std::memset(&addr, 0, sizeof(addr));
+	addr.sin_family = IPType;
+	addr.sin_addr.s_addr = htonl(ADDR_ANY);
+	addr.sin_port = 0;
+
+	int state = bind(sock, (SOCKADDR*)&addr, sizeof(addr));
+	if (state != 0) {
+		closesocket(sock);
+		return false;
+	}
+
+	SOCKADDR_IN resultAddr;
+	std::memset(&resultAddr, 0, sizeof(resultAddr));
+	int addrLen = static_cast<int>(sizeof(resultAddr));
+	state = getsockname(sock, (SOCKADDR*)&resultAddr, &addrLen);
+	if (state != 0) {
+		closesocket(sock);
+		return false;
+	}
+
+	Port = ntohs(resultAddr.sin_port);
+	closesocket(sock);
+	return true;
 }

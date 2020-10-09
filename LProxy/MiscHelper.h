@@ -4,7 +4,9 @@
 #include "json.hpp"
 
 #include <string>
+#include <WinSock2.h>
 #include <windows.h>
+#include <vector>
 
 using Json = nlohmann::json;
 
@@ -15,8 +17,9 @@ public:
 	static std::string GetDateTime();
 	static void CloseProcessByHandle(DWORD ProcessId);
 	static Json	LoadConfig();
-	static std::string GetLocalHost();
+	static bool GetLocalHostS(unsigned long& IP);
 	static std::string NewGuid(int Length);
+	static bool GetAvaliablePort(unsigned short Port, bool bTCP = true, int IPType = AF_INET);
 };
 
 #endif
