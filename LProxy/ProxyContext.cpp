@@ -21,6 +21,11 @@ ProxyContext::~ProxyContext()
 		Client = INVALID_SOCKET;
 	}
 
+	if (UDPClient != INVALID_SOCKET) {
+		closesocket(UDPClient);
+		UDPClient = INVALID_SOCKET;
+	}
+
 	if (Destination != INVALID_SOCKET) {
 		closesocket(Destination);
 		Destination = INVALID_SOCKET;
@@ -29,7 +34,7 @@ ProxyContext::~ProxyContext()
 
 bool ProxyContext::operator==(const ProxyContext& Other) const
 {
-	return (Client == Client && Destination == Destination);
+	return (Client == Other.Client && UDPClient == Other.UDPClient && Destination == Other.Destination);
 }
 
 EConnectionState ProxyContext::GetConnectionState() const
@@ -106,7 +111,7 @@ void ProxyContext::ProcessWaitLicense()
 		return;
 	}
 
-	BufferReader reader(licenseData, TRAFFIC_BUFFER_SIZE);
+	BufferReader reader(licenseData, recvResult);
 
 	reader.Serialize(&LicensePayload.Version, 1);
 
@@ -196,7 +201,7 @@ void ProxyContext::ProcessWaitLicense()
 
 bool ProxyContext::ProcessConnectCmd()
 {
-	if (!ParsePayloadAddress()) {
+	if (!ParseTCPPayloadAddress()) {
 		return false;
 	}
 
@@ -213,16 +218,16 @@ bool ProxyContext::ProcessConnectCmd()
 
 bool ProxyContext::ProcessUDPCmd()
 {
-	if (!ParsePayloadAddress()) {
+	if (!ParseUDPPayloadAddress()) {
 		return false;
 	}
 
 	TIMEVAL timeout = { 0, SOCK_TIMEOUT_MSEC };
-	setsockopt(Destination, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
+	setsockopt(UDPClient, SOL_SOCKET, SO_RCVTIMEO, (const char*)&timeout, sizeof(timeout));
 
-	LOG(Log, "[Connection: %d]Connect to destination server with udp connection succeeded.", GetCurrentThreadId().c_str());
+	LOG(Log, "[Connection: %s]Connect to destination server with udp connection succeeded.", GetCurrentThreadId().c_str());
 
-	return SendLicenseResponse(ETravelResponse::Succeeded);
+	return SendLicenseResponse(ETravelResponse::Succeeded, false);
 }
 
 bool ProxyContext::SendHandshakeResponse(EConnectionProtocol Response)
@@ -248,16 +253,38 @@ bool ProxyContext::SendHandshakeResponse(EConnectionProtocol Response)
 	return sendResult != SOCKET_ERROR;
 }
 
-bool ProxyContext::SendLicenseResponse(ETravelResponse Response)
+bool ProxyContext::SendLicenseResponse(ETravelResponse Response, bool bTCP /*= true*/)
 {
 	TravelReply reply;
 	reply.Version = LicensePayload.Version;
 	reply.Reply = Response;
 	reply.Reserved = 0x00;
-	reply.AddressType = LicensePayload.AddressType;
-	reply.BindAddress = LicensePayload.DestAddr;
-	reply.BindAddress.reserve(reply.BindAddress.size() - 1);
-	reply.BindPort = LicensePayload.DestPort;
+	if (bTCP) {
+		reply.AddressType = LicensePayload.AddressType;
+		reply.BindAddress = LicensePayload.DestAddr;
+		reply.BindAddress.reserve(reply.BindAddress.size() - 1);
+		reply.BindPort = LicensePayload.DestPort;
+	}
+	else {
+		reply.AddressType = EAddressType::IPv4;
+		reply.BindAddress.resize(4);
+		unsigned long localIP(0);
+		if (!MiscHelper::GetLocalHostS(localIP)) {
+			LOG(Error, "[Connection: %s]Try get server localhost ip failed, code: %d", GetCurrentThreadId().c_str(), WSAGetLastError());
+			return false;
+		}
+
+		std::memcpy(reply.BindAddress.data(), &localIP, 4);
+
+		if (!MiscHelper::GetAvaliablePort(UDPPort)) {
+			LOG(Error, "[Connection: %s]Try find a avaliable port failed, code: %d", GetCurrentThreadId().c_str(), WSAGetLastError());
+			return false;
+		}
+
+		reply.BindPort.resize(2);
+		unsigned short nport = htons(UDPPort);
+		std::memcpy(reply.BindPort.data(), &nport, 2);
+	}
 
 	std::vector<char> replyData;
 	replyData.push_back(static_cast<char>(reply.Version));
@@ -414,7 +441,7 @@ std::string ProxyContext::GetTravelResponseName(ETravelResponse Response)
 	}
 }
 
-bool ProxyContext::ParsePayloadAddress()
+bool ProxyContext::ParseTCPPayloadAddress()
 {
 	std::memset(&DestAddr, 0, sizeof(DestAddr));
 	std::memcpy(&DestAddr.sin_port, LicensePayload.DestPort.data(), 2);
@@ -464,6 +491,78 @@ bool ProxyContext::ParsePayloadAddress()
 	}
 
 	if (Destination == INVALID_SOCKET) {
+		LOG(Error, "[Connection: %s]Create a new socket to connect destination server failed, code: %d.", GetCurrentThreadId().c_str(), WSAGetLastError());
+		SendLicenseResponse(ETravelResponse::GeneralFailure);
+		return false;
+	}
+
+	return true;
+}
+
+bool ProxyContext::ParseUDPPayloadAddress()
+{
+	std::memset(&UDPClientAddr, 0, sizeof(UDPClientAddr));
+	std::memcpy(&UDPClientAddr.sin_port, LicensePayload.DestPort.data(), 2);
+	switch (LicensePayload.AddressType)
+	{
+	case EAddressType::IPv4:
+	{
+		if (!MiscHelper::GetAvaliablePort(UDPPort, false)) {
+			LOG(Warning, "[Connection: %s]Get avaliable port failed, err: %d.", GetCurrentThreadId().c_str(), WSAGetLastError());
+			State = EConnectionState::LicenseError;
+			SendLicenseResponse(ETravelResponse::GeneralFailure);
+			return false;
+		}
+
+		UDPClientAddr.sin_family = AF_INET;
+
+		std::memcpy(&DestAddr.sin_addr, LicensePayload.DestAddr.data(), 4);
+
+		UDPClient = socket(AF_INET, SOCK_DGRAM, 0);
+
+		break;
+	}
+	case EAddressType::DomainName:
+	{
+		if (!MiscHelper::GetAvaliablePort(UDPPort, false)) {
+			LOG(Warning, "[Connection: %s]Get avaliable port failed, err: %d.", GetCurrentThreadId().c_str(), WSAGetLastError());
+			State = EConnectionState::LicenseError;
+			SendLicenseResponse(ETravelResponse::GeneralFailure);
+			return false;
+		}
+
+		UDPClientAddr.sin_family = AF_INET;
+
+		ADDRINFO info, * result;
+		std::memset(&info, 0, sizeof(ADDRINFO));
+		info.ai_socktype = SOCK_DGRAM;
+		info.ai_family = AF_INET;
+
+		int error = getaddrinfo(LicensePayload.DestAddr.data(), nullptr, &info, &result);
+		if (error != 0) {
+			LOG(Warning, "[Connection: %s]Convert hostname to ip address failed, err: %s.", GetCurrentThreadId().c_str(), gai_strerrorA(error));
+			State = EConnectionState::LicenseError;
+			SendLicenseResponse(ETravelResponse::HostUnreachable);
+			return false;
+		}
+
+		UDPClientAddr.sin_addr = ((SOCKADDR_IN*)(result->ai_addr))->sin_addr;
+
+		freeaddrinfo(result);
+
+		UDPClient = socket(AF_INET, SOCK_DGRAM, 0);
+
+		break;
+	}
+	case EAddressType::IPv6:
+	{
+		State = EConnectionState::LicenseError;
+		SendLicenseResponse(ETravelResponse::AddrNotSupported);
+		return false;
+	}
+	}
+
+	if (UDPClient == INVALID_SOCKET) {
 		LOG(Error, "[Connection: %s]Create a new socket to connect destination server failed, code: %d.", GetCurrentThreadId().c_str(), WSAGetLastError());
 		SendLicenseResponse(ETravelResponse::GeneralFailure);
 		return false;

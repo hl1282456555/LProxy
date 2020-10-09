@@ -28,7 +28,7 @@ public:
 
 	virtual bool SendHandshakeResponse(EConnectionProtocol Response);
 
-	virtual bool SendLicenseResponse(ETravelResponse Response);
+	virtual bool SendLicenseResponse(ETravelResponse Response, bool bTCP = true);
 
 	virtual void ProcessForwardData();
 
@@ -44,15 +44,21 @@ protected:
 
 	virtual std::string GetTravelResponseName(ETravelResponse Response);
 
-	virtual bool ParsePayloadAddress();
+	virtual bool ParseTCPPayloadAddress();
+
+	virtual bool ParseUDPPayloadAddress();
 
 	virtual UDPTravelReply ParseUDPPacket(const char* buffer, int Len);
 
 protected:
 	SOCKET	Client;
+	SOCKET	UDPClient;
 	SOCKET	Destination;
 
+	SOCKADDR_IN UDPClientAddr;
 	SOCKADDR_IN DestAddr;
+
+	unsigned short UDPPort;
 
 	TravelPayload LicensePayload;
 
