@@ -3,7 +3,7 @@
 
 #include <vector>
 
-#define TRAFFIC_BUFFER_SIZE 1024
+#define TRAFFIC_BUFFER_SIZE 1024 * 100
 #define SOCK_TIMEOUT_SEC 3
 #define SOCK_TIMEOUT_MSEC 20
 
