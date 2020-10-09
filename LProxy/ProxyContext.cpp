@@ -276,11 +276,6 @@ bool ProxyContext::SendLicenseResponse(ETravelResponse Response, bool bTCP /*= t
 
 		std::memcpy(reply.BindAddress.data(), &localIP, 4);
 
-		if (!MiscHelper::GetAvaliablePort(UDPPort)) {
-			LOG(Error, "[Connection: %s]Try find a avaliable port failed, code: %d", GetCurrentThreadId().c_str(), WSAGetLastError());
-			return false;
-		}
-
 		reply.BindPort.resize(2);
 		unsigned short nport = htons(UDPPort);
 		std::memcpy(reply.BindPort.data(), &nport, 2);
@@ -401,6 +396,31 @@ bool ProxyContext::TransportTraffic(SOCKET Source, SOCKET Target)
 
 bool ProxyContext::TransportUDPTraffic()
 {
+	int recvState(0), sendState(0);
+	
+	char buffer[TRAFFIC_BUFFER_SIZE];
+	SOCKADDR_IN recvAddr;
+	std::memset(&recvAddr, 0, sizeof(recvAddr));
+	recvAddr.sin_family = AF_INET;
+
+	unsigned long localIP;
+	MiscHelper::GetLocalHostS(localIP);
+	recvAddr.sin_addr.s_addr = htonl(localIP);
+	recvAddr.sin_port = htons(UDPPort);
+	int addrLen = static_cast<int>(sizeof(recvAddr));
+	recvState = recvfrom(UDPClient, buffer, TRAFFIC_BUFFER_SIZE, 0, (SOCKADDR*)&recvAddr, &addrLen);
+	if (recvState == SOCKET_ERROR) {
+		LOG(Log, "[Connection: %s]Recv from client failed, code: %d", GetCurrentThreadId().c_str(), WSAGetLastError());
+		return false;
+	}
+
+	if (recvState != 0) {
+		UDPTravelReply reply = ParseUDPPacket(buffer, recvState);
+		addrLen = static_cast<int>(sizeof(DestAddr));
+		sendState = sendto(Destination, reply.Data.data(), static_cast<int>(reply.Data.size()), 0, (SOCKADDR*)&DestAddr, addrLen);
+		return false;
+	}
+
 	return false;
 }
 
